@@ -149,13 +149,8 @@ export default function App() {
             language={settings.language}
             dhikrs={dhikrs}
             sessions={sessions}
-            goals={goals}
-            activeDhikr={activeDhikr}
-            activeSession={activeSession}
             onStartCounting={handleStartCounting}
             onResumeSession={handleResumeSession}
-            onNavigate={handleNavigate}
-            onSelectDhikrDetail={handleOpenDetails}
           />
         )}
 
