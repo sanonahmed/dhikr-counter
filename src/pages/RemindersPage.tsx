@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Bell, BellRing, Info, Plus, Trash2 } from 'lucide-react';
 import type { Language, ReminderItem } from '../types/dhikr';
 import { db, generateId } from '../db/database';
 import { getTranslations } from '../i18n/translations';
 import { Button, Card, ConfirmDialog, EmptyState, Input, Modal, Select, Switch } from '../components/ui/Primitives';
 import { cn } from '../utils/cn';
+import { getNotificationPermission, requestNotificationPermission, showLocalNotification } from '../utils/notifications';
 
 interface RemindersPageProps {
   language: Language;
@@ -46,10 +47,7 @@ const PRESET_TEMPLATES: Record<
 
 export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminders }) => {
   const t = getTranslations(language);
-  const notificationsSupported = typeof Notification !== 'undefined';
-  const [permission, setPermission] = useState<string>(
-    notificationsSupported ? Notification.permission : 'unsupported'
-  );
+  const [permission, setPermission] = useState(() => getNotificationPermission());
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -61,34 +59,64 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReminderItem | null>(null);
 
+  useEffect(() => {
+    const refreshPermission = () => setPermission(getNotificationPermission());
+    window.addEventListener('focus', refreshPermission);
+    document.addEventListener('visibilitychange', refreshPermission);
+    return () => {
+      window.removeEventListener('focus', refreshPermission);
+      document.removeEventListener('visibilitychange', refreshPermission);
+    };
+  }, []);
+
   const handleRequestPermission = async () => {
-    if (!notificationsSupported) {
-      setStatusMessage('This browser does not support Web Notifications. In-app reminder banners will still appear.');
-      return;
+    try {
+      const result = await requestNotificationPermission();
+      setPermission(result);
+      setStatusMessage(
+        result === 'granted'
+          ? 'Notifications are allowed. Send a test notification to confirm your device displays them.'
+          : result === 'denied'
+            ? 'Notifications are blocked. Enable them for this site in your browser or device settings.'
+            : 'This browser or connection does not support Web Notifications. Use HTTPS (or localhost) in a supported browser.'
+      );
+    } catch {
+      setPermission(getNotificationPermission());
+      setStatusMessage('Could not request notification permission. Check this site’s browser settings and try again.');
     }
-    const res = await Notification.requestPermission();
-    setPermission(res);
-    setStatusMessage(
-      res === 'granted'
-        ? 'Notifications enabled successfully.'
-        : 'Notification permission was not granted. You can still use in-app reminders.'
-    );
   };
 
-  const handleTestNotification = () => {
-    if (notificationsSupported && Notification.permission === 'granted') {
-      try {
-        new Notification('Dhikr Counter', {
-          body: 'Assalamu Alaikum — your local reminders are working.',
-          icon: '/pwa-192x192.png',
-        });
-        setStatusMessage('Test notification sent.');
+  const handleTestNotification = async () => {
+    try {
+      let currentPermission = getNotificationPermission();
+      if (currentPermission === 'unsupported') {
+        setPermission(currentPermission);
+        setStatusMessage('Notifications are unavailable here. Use a supported browser on HTTPS (or localhost).');
         return;
-      } catch {
-        // Fallback below
       }
+
+      if (currentPermission === 'default') {
+        currentPermission = await requestNotificationPermission();
+        setPermission(currentPermission);
+      }
+
+      if (currentPermission !== 'granted') {
+        setStatusMessage(
+          currentPermission === 'denied'
+            ? 'Notifications are blocked for this site. Enable them in your browser/device settings, then try again.'
+            : 'Notification permission was not granted. Allow notifications when your browser asks, then try again.'
+        );
+        return;
+      }
+
+      await showLocalNotification('Dhikr Counter', {
+        body: 'Assalamu Alaikum — your local notifications are working.',
+        tag: 'dhikr-counter-test',
+      });
+      setStatusMessage('Test notification sent to your browser. If it is not visible, check site notification settings and Do Not Disturb.');
+    } catch {
+      setStatusMessage('The browser could not display the notification. Check device/site notification settings and try again.');
     }
-    setStatusMessage('In-app test reminder triggered (grant browser permission for OS notifications).');
   };
 
   const handlePresetSelect = (type: ReminderItem['presetType']) => {

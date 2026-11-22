@@ -252,7 +252,7 @@ export const TRANSLATIONS = {
       enableNotifications: 'Enable Browser Notifications',
       testNotification: 'Send Test',
       limitationNote:
-        'Browser Limitation: Web apps can trigger scheduled notifications reliably while the app is open or running in the background tab. For guaranteed wake-up alarms when a phone browser is fully closed, pair with your device calendar or alarm.',
+        'Notifications require browser permission and may also be blocked by device notification settings or Do Not Disturb. Scheduled reminders run while this app is open or its tab is active in the background; browsers cannot guarantee timed reminders after the app/browser is fully closed. Use your device alarm for guaranteed wake-up alerts.',
       emptyTitle: 'No reminders scheduled',
       emptyDesc: 'Add Morning, Evening, Durood, or Istighfar reminders.',
     },
@@ -560,7 +560,7 @@ export const TRANSLATIONS = {
       enableNotifications: 'নোটিফিকেশন চালু করুন',
       testNotification: 'পরীক্ষা করুন',
       limitationNote:
-        'ব্রাউজার সীমাবদ্ধতা: অ্যাপ বা ট্যাব খোলা থাকলে ওয়েব নোটিফিকেশন নির্ভরযোগ্যভাবে কাজ করে। ব্রাউজার সম্পূর্ণ বন্ধ থাকলে নিশ্চিত অ্যালার্মের জন্য ফোনের অ্যালার্ম ব্যবহার করুন।',
+        'নোটিফিকেশনের জন্য ব্রাউজার অনুমতি প্রয়োজন; ডিভাইসের নোটিফিকেশন সেটিংস বা ডু নট ডিস্টার্ব মোডেও এটি বন্ধ থাকতে পারে। অ্যাপ খোলা থাকলে বা ট্যাব ব্যাকগ্রাউন্ডে চালু থাকলে নির্ধারিত রিমাইন্ডার কাজ করে। অ্যাপ বা ব্রাউজার পুরোপুরি বন্ধ থাকলে ব্রাউজার নির্ভরযোগ্যভাবে সময়মতো রিমাইন্ডার দিতে পারে না—নিশ্চিত অ্যালার্মের জন্য ডিভাইসের অ্যালার্ম ব্যবহার করুন।',
       emptyTitle: 'কোনো রিমাইন্ডার নেই',
       emptyDesc: 'সকাল, সন্ধ্যা, দরুদ বা ইস্তিগফারের রিমাইন্ডার যুক্ত করুন।',
     },

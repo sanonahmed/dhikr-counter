@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { db } from '../db/database';
 import type { ReminderItem } from '../types/dhikr';
 import { toLocalDayKey } from '../utils/dateUtils';
+import { showLocalNotification } from '../utils/notifications';
 
 export function useReminderScheduler(reminders: ReminderItem[]) {
   const [activeAlert, setActiveAlert] = useState<ReminderItem | null>(null);
@@ -24,17 +25,12 @@ export function useReminderScheduler(reminders: ReminderItem[]) {
         db.reminders.update(rem.id, { lastTriggeredDate: todayKey }).catch(() => {});
         setActiveAlert(rem);
 
-        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          try {
-            new Notification(rem.title, {
-              body: rem.message,
-              icon: '/pwa-192x192.png',
-              tag: rem.id,
-            });
-          } catch {
-            // Fallback already shown via in-app alert banner
-          }
-        }
+        void showLocalNotification(rem.title, {
+          body: rem.message,
+          tag: rem.id,
+        }).catch(() => {
+          // The in-app reminder banner above remains the fallback.
+        });
       }
     };
 
