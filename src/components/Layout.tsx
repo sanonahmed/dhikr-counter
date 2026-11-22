@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BarChart3,
   Bell,
+  Bot,
   BookOpen,
   Clock,
   FolderHeart,
@@ -64,6 +65,7 @@ export const Layout: React.FC<LayoutProps> = ({
     { id: 'history', label: t.nav.history, icon: Clock },
     { id: 'customization', label: t.nav.customization, icon: Palette },
     { id: 'reminders', label: t.nav.reminders, icon: Bell },
+    { id: 'admin-notifications', label: 'AI Notifications', icon: Bot },
     { id: 'backup', label: t.nav.backup, icon: HardDriveDownload },
     { id: 'about', label: t.nav.about, icon: Info },
   ];
@@ -76,7 +78,7 @@ export const Layout: React.FC<LayoutProps> = ({
     if (tabId === 'statistics' && (currentPage === 'history' || currentPage === 'goals')) {
       return true;
     }
-    if (tabId === 'settings' && (currentPage === 'customization' || currentPage === 'reminders' || currentPage === 'backup' || currentPage === 'about')) {
+    if (tabId === 'settings' && (currentPage === 'customization' || currentPage === 'reminders' || currentPage === 'admin-notifications' || currentPage === 'backup' || currentPage === 'about')) {
       return true;
     }
     return false;

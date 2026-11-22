@@ -40,6 +40,9 @@ const BackupRestorePage = lazy(() =>
 const AboutPrivacyPage = lazy(() =>
   import('./pages/AboutPrivacyPage').then((m) => ({ default: m.AboutPrivacyPage }))
 );
+const AdminNotificationsPage = lazy(() =>
+  import('./pages/AdminNotificationsPage').then((m) => ({ default: m.AdminNotificationsPage }))
+);
 
 function PageLoader() {
   return (
@@ -282,6 +285,8 @@ export default function App() {
               onInstall={pwa.install}
             />
           )}
+
+          {currentPage === 'admin-notifications' && <AdminNotificationsPage />}
 
           {currentPage === 'backup' && (
             <BackupRestorePage settings={settings} onReplaceSettings={replaceSettings} />
