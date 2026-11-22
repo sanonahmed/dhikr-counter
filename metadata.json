@@ -1,0 +1,6 @@
+{
+  "name": "Dhikr Counter",
+  "description": "A serene, offline-capable Islamic Dhikr, Durood, Istighfar, and digital Tasbih companion with bilingual English & Bengali support, deep customization, and local-first analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
