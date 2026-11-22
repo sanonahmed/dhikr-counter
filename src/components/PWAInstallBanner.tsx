@@ -1,16 +1,12 @@
 import React, { useState } from 'react';
-import { Download, RefreshCw, Share, Smartphone, WifiOff } from 'lucide-react';
+import { Download, Share, Smartphone, WifiOff } from 'lucide-react';
 import { Button, Modal } from './ui/Primitives';
 
 interface PWAInstallControlsProps {
   isInstallable: boolean;
   isInstalled: boolean;
   isIOS: boolean;
-  isOnline: boolean;
-  needRefresh: boolean;
   onInstall: () => Promise<boolean>;
-  onApplyUpdate: () => Promise<void>;
-  onDismissUpdate: () => void;
   compact?: boolean;
 }
 
@@ -80,46 +76,17 @@ export const PWAInstallButton: React.FC<{
   );
 };
 
-export const PWAStatusOverlays: React.FC<PWAInstallControlsProps> = ({
-  isOnline,
-  needRefresh,
-  onApplyUpdate,
-  onDismissUpdate,
-}) => {
-  return (
-    <>
-      {!isOnline && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl bg-amber-700 text-white px-4 py-2 text-xs font-medium shadow-lg"
-        >
-          <WifiOff className="w-3.5 h-3.5 shrink-0" />
-          <span>Offline Mode · All counts save locally on device</span>
-        </div>
-      )}
+export const PWAStatusOverlays: React.FC<{ isOnline: boolean }> = ({ isOnline }) => {
+  if (isOnline) return null;
 
-      {needRefresh && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="fixed bottom-20 lg:bottom-6 right-4 z-50 flex items-center gap-3 rounded-2xl bg-[var(--bg-surface)] border border-[var(--border-strong)] px-4 py-3 shadow-xl max-w-sm"
-        >
-          <RefreshCw className="w-4 h-4 text-[var(--accent-primary)] shrink-0" />
-          <div className="text-xs text-[var(--text-primary)]">
-            <p className="font-semibold">Update available</p>
-            <p className="text-[var(--text-muted)]">Refresh to load the latest version.</p>
-          </div>
-          <div className="flex items-center gap-1.5 ml-auto">
-            <Button size="sm" variant="primary" onClick={() => void onApplyUpdate()}>
-              Update
-            </Button>
-            <Button size="sm" variant="ghost" onClick={onDismissUpdate}>
-              Later
-            </Button>
-          </div>
-        </div>
-      )}
-    </>
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl bg-amber-700 text-white px-4 py-2 text-xs font-medium shadow-lg"
+    >
+      <WifiOff className="w-3.5 h-3.5 shrink-0" />
+      <span>Offline Mode · All counts save locally on device</span>
+    </div>
   );
 };

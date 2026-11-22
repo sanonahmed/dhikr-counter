@@ -321,16 +321,7 @@ export default function App() {
         </div>
       )}
 
-      <PWAStatusOverlays
-        isInstallable={pwa.isInstallable}
-        isInstalled={pwa.isInstalled}
-        isIOS={pwa.isIOS}
-        isOnline={pwa.isOnline}
-        needRefresh={pwa.needRefresh}
-        onInstall={pwa.install}
-        onApplyUpdate={pwa.applyUpdate}
-        onDismissUpdate={pwa.dismissUpdate}
-      />
+      <PWAStatusOverlays isOnline={pwa.isOnline} />
     </>
   );
 }

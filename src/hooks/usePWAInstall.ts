@@ -6,14 +6,13 @@ interface BeforeInstallPromptEvent extends Event {
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed'; platform: string }>;
 }
 
+const UPDATE_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+
 export function usePWAInstall() {
   const [deferredPrompt, setDeferredPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
-  const [needRefresh, setNeedRefresh] = useState(false);
-  const [offlineReady, setOfflineReady] = useState(false);
-  const [updateSWFn, setUpdateSWFn] = useState<((reloadPage?: boolean) => Promise<void>) | null>(null);
 
   useEffect(() => {
     const isStandalone =
@@ -23,6 +22,15 @@ export function usePWAInstall() {
 
     const ua = window.navigator.userAgent.toLowerCase();
     setIsIOS(/iphone|ipad|ipod/.test(ua));
+
+    let serviceWorkerRegistration: ServiceWorkerRegistration | undefined;
+    const checkForUpdates = () => {
+      if (navigator.onLine) {
+        void serviceWorkerRegistration?.update().catch(() => {
+          // The next focus, online event, or periodic check will retry.
+        });
+      }
+    };
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -34,30 +42,37 @@ export function usePWAInstall() {
       setDeferredPrompt(null);
     };
 
-    const handleOnline = () => setIsOnline(true);
+    const handleOnline = () => {
+      setIsOnline(true);
+      checkForUpdates();
+    };
     const handleOffline = () => setIsOnline(false);
+    const handleFocus = () => checkForUpdates();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') checkForUpdates();
+    };
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
     window.addEventListener('appinstalled', handleAppInstalled);
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener('focus', handleFocus);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
-    // Register Service Worker with update detection
+    const updateCheckInterval = window.setInterval(checkForUpdates, UPDATE_CHECK_INTERVAL_MS);
+
     try {
-      const updateSW = registerSW({
-        onNeedRefresh() {
-          setNeedRefresh(true);
-        },
-        onOfflineReady() {
-          setOfflineReady(true);
+      registerSW({
+        immediate: true,
+        onRegisteredSW(_serviceWorkerUrl, registration) {
+          serviceWorkerRegistration = registration;
         },
         onRegisterError() {
-          // Graceful fallback in restricted iframes
+          // Graceful fallback in restricted iframes or unsupported browsers.
         },
       });
-      setUpdateSWFn(() => updateSW);
     } catch {
-      // Service worker registration skipped if unsupported
+      // Service worker registration skipped if unsupported.
     }
 
     return () => {
@@ -65,6 +80,9 @@ export function usePWAInstall() {
       window.removeEventListener('appinstalled', handleAppInstalled);
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('focus', handleFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.clearInterval(updateCheckInterval);
     };
   }, []);
 
@@ -80,23 +98,11 @@ export function usePWAInstall() {
     return false;
   };
 
-  const applyUpdate = async () => {
-    if (updateSWFn) {
-      await updateSWFn(true);
-    } else {
-      window.location.reload();
-    }
-  };
-
   return {
     isInstallable: Boolean(deferredPrompt),
     isInstalled,
     isIOS,
     isOnline,
-    needRefresh,
-    offlineReady,
     install,
-    applyUpdate,
-    dismissUpdate: () => setNeedRefresh(false),
   };
 }
