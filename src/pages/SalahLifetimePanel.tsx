@@ -46,7 +46,23 @@ export const SalahLifetimePanel: React.FC<Props> = ({ language, salahDays, selec
     return { daysByKey, recorded, completeKeys, prayedCount, markedCount, bestStreak, calendarDays };
   }, [salahDays]);
   const visibleRecords = showAll ? recorded : recorded.slice(0, 8);
-  const fmt = (value: number) => new Intl.NumberFormat(language === 'bn' ? 'bn-BD' : 'en-US').format(value);
+  const locale = language === 'bn' ? 'bn-BD' : 'en-US';
+  const fmt = (value: number) => new Intl.NumberFormat(locale).format(value);
+  const calendarStart = addDays(calendarDays[0], -fromLocalDayKey(calendarDays[0]).getDay());
+  const calendarWeeks = Array.from({ length: 53 }, (_, weekIndex) =>
+    Array.from({ length: 7 }, (_, weekdayIndex) => {
+      const dayKey = addDays(calendarStart, weekIndex * 7 + weekdayIndex);
+      return dayKey >= calendarDays[0] && dayKey <= calendarDays[calendarDays.length - 1] ? dayKey : null;
+    }),
+  );
+  const weekdayLabels = Array.from({ length: 7 }, (_, weekdayIndex) =>
+    new Intl.DateTimeFormat(locale, { weekday: 'narrow' }).format(fromLocalDayKey(addDays(calendarStart, weekdayIndex))),
+  );
+  const monthLabels = calendarWeeks.map((week, weekIndex) => {
+    const firstOfMonth = week.find((dayKey) => dayKey && fromLocalDayKey(dayKey).getDate() === 1);
+    const labelDay = firstOfMonth ?? (weekIndex === 0 ? calendarDays[0] : null);
+    return labelDay ? new Intl.DateTimeFormat(locale, { month: 'short' }).format(fromLocalDayKey(labelDay)) : '';
+  });
 
   return (
     <section className="space-y-4" aria-label={t.salah.lifetimeTitle}>
@@ -75,18 +91,25 @@ export const SalahLifetimePanel: React.FC<Props> = ({ language, salahDays, selec
         <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-card)] sm:p-6">
           <div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-[var(--text-primary)]">{t.salah.activityTitle}</h3><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{t.salah.activitySubtitle}</p></div><span className="shrink-0 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--accent-primary)]">{t.salah.pastYear}</span></div>
           <div className="mt-5 overflow-x-auto pb-2" role="group" aria-label={t.salah.activityTitle}>
-            <div className="grid w-max grid-flow-col grid-rows-7 gap-[3px]">
-              {calendarDays.map((dayKey) => {
-                const day = daysByKey.get(dayKey);
-                const count = PRAYERS.filter((prayer) => day?.statuses?.[prayer] === 'prayed').length;
-                const marked = PRAYERS.filter((prayer) => Boolean(day?.statuses?.[prayer])).length;
-                const color = !marked ? 'bg-[var(--bg-surface-muted)]' : count === 5 ? 'bg-[var(--accent-gold)]' : count >= 3 ? 'bg-[var(--accent-primary)]' : count > 0 ? 'bg-[var(--accent-primary)]/55' : 'bg-red-400/70';
-                const label = `${formatDate(dayKey, language, true)} \u00b7 ${fmt(count)}/5 ${t.salah.lifetimePrayersShort}`;
-                return <button key={dayKey} type="button" title={label} aria-label={label} aria-pressed={selectedDay === dayKey} onClick={() => onSelectDay(dayKey)} className={cn('h-[11px] w-[11px] rounded-[3px] transition-all hover:scale-125 hover:ring-2 hover:ring-[var(--accent-primary)]/50', color, selectedDay === dayKey && 'ring-2 ring-[var(--accent-gold)] ring-offset-1')} />;
-              })}
+            <div className="grid min-w-[600px] gap-x-[3px] gap-y-1" style={{ gridTemplateColumns: '16px repeat(53, minmax(0, 1fr))' }}>
+              <span aria-hidden="true" />
+              {monthLabels.map((month, weekIndex) => <span key={`month-${weekIndex}`} className="relative h-4 overflow-visible text-[9px] leading-3 text-[var(--text-muted)]">{month && <span className="absolute left-0 whitespace-nowrap">{month}</span>}</span>)}
+              {weekdayLabels.flatMap((label, weekdayIndex) => [
+                <span key={`weekday-${weekdayIndex}`} className="flex h-3.5 items-center text-[9px] leading-none text-[var(--text-muted)]">{weekdayIndex % 2 === 0 ? label : ''}</span>,
+                ...calendarWeeks.map((week, weekIndex) => {
+                  const dayKey = week[weekdayIndex];
+                  if (!dayKey) return <span key={`empty-${weekIndex}-${weekdayIndex}`} className="mx-auto aspect-square w-full max-w-[11px]" aria-hidden="true" />;
+                  const day = daysByKey.get(dayKey);
+                  const count = PRAYERS.filter((prayer) => day?.statuses?.[prayer] === 'prayed').length;
+                  const marked = PRAYERS.filter((prayer) => Boolean(day?.statuses?.[prayer])).length;
+                  const color = !marked ? 'bg-[var(--bg-surface-muted)]' : count === 5 ? 'bg-[var(--accent-gold)]' : count >= 3 ? 'bg-[var(--accent-primary)]' : count > 0 ? 'bg-[var(--accent-primary)]/55' : 'bg-red-400/70';
+                  const labelText = `${formatDate(dayKey, language, true)} · ${fmt(count)}/5 ${t.salah.lifetimePrayersShort}`;
+                  return <button key={dayKey} type="button" title={labelText} aria-label={labelText} aria-pressed={selectedDay === dayKey} onClick={() => onSelectDay(dayKey)} className={cn('mx-auto aspect-square w-full max-w-[11px] rounded-[3px] transition-transform hover:scale-125 hover:ring-2 hover:ring-[var(--accent-primary)]/50', color, selectedDay === dayKey && 'ring-2 ring-[var(--accent-gold)] ring-offset-1')} />;
+                }),
+              ])}
             </div>
           </div>
-          <div className="mt-2 flex flex-wrap items-center justify-between gap-3 text-[10px] text-[var(--text-muted)]"><span>{fmt(recorded.filter((day) => calendarDays[0] <= day.id).length)} {t.salah.activityRecordedDays}</span><span className="inline-flex items-center gap-1.5"><span>{t.salah.less}</span>{['bg-[var(--bg-surface-muted)]', 'bg-[var(--accent-primary)]/45', 'bg-[var(--accent-primary)]', 'bg-[var(--accent-gold)]'].map((color) => <span key={color} className={cn('h-[10px] w-[10px] rounded-[3px]', color)} />)}<span>{t.salah.more}</span></span></div>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[10px] text-[var(--text-muted)]"><span>{fmt(recorded.filter((day) => calendarDays[0] <= day.id).length)} {t.salah.activityRecordedDays}</span><span className="inline-flex items-center gap-1.5"><span>{t.salah.less}</span>{['bg-[var(--bg-surface-muted)]', 'bg-[var(--accent-primary)]/45', 'bg-[var(--accent-primary)]', 'bg-[var(--accent-gold)]'].map((color) => <span key={color} className={cn('h-[10px] w-[10px] rounded-[3px]', color)} />)}<span>{t.salah.more}</span></span></div>
           <p className="mt-4 border-t border-[var(--border-subtle)] pt-3 text-[10px] leading-relaxed text-[var(--text-muted)]">{t.salah.heatmapHint}</p>
         </div>
         <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-card)] sm:p-6">
