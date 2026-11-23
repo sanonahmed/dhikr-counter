@@ -6,6 +6,7 @@ import { getTranslations } from '../i18n/translations';
 import { Button, Card, ConfirmDialog, EmptyState, Input, Modal, Select, Switch } from '../components/ui/Primitives';
 import { cn } from '../utils/cn';
 import { getNotificationPermission, requestNotificationPermission, showLocalNotification } from '../utils/notifications';
+import { registerPushDevice } from '../utils/pushNotifications';
 
 interface RemindersPageProps {
   language: Language;
@@ -73,9 +74,12 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
     try {
       const result = await requestNotificationPermission();
       setPermission(result);
+      const pushResult = result === 'granted' ? await registerPushDevice() : 'permission-denied';
       setStatusMessage(
         result === 'granted'
-          ? 'Notifications are allowed. Send a test notification to confirm your device displays them.'
+          ? pushResult === 'subscribed'
+            ? 'Notifications are enabled and this device is registered for admin broadcasts.'
+            : 'Notifications are allowed for local reminders. This device could not register for admin broadcasts.'
           : result === 'denied'
             ? 'Notifications are blocked. Enable them for this site in your browser or device settings.'
             : 'This browser or connection does not support Web Notifications. Use HTTPS (or localhost) in a supported browser.'
@@ -109,11 +113,12 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
         return;
       }
 
+      await registerPushDevice();
       await showLocalNotification('Dhikr Counter', {
         body: 'Assalamu Alaikum — your local notifications are working.',
         tag: 'dhikr-counter-test',
       });
-      setStatusMessage('Test notification sent to your browser. If it is not visible, check site notification settings and Do Not Disturb.');
+      setStatusMessage('Test notification sent. This device is also registered for admin broadcasts.');
     } catch {
       setStatusMessage('The browser could not display the notification. Check device/site notification settings and try again.');
     }

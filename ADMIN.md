@@ -81,6 +81,32 @@ not return JSON is obvious before you send anything.
 
 ---
 
+## Sending to every device
+
+The studio's **Broadcast to all devices** button sends one Web Push message to
+every device that has registered with the Node service. Delivery works while the
+app is closed because the service worker shows the notification.
+
+A device registers automatically when it opens the app **and** notification
+permission is already granted. Users who have not allowed notifications yet
+register the first time they press **Enable notifications** or **Test
+notification** on the Reminders page. iOS also requires the PWA to be installed
+on the home screen (iOS 16.4+) before it can receive push.
+
+Required on the Node service:
+
+| Variable | Purpose |
+| --- | --- |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Authenticate push delivery. Generate once with `node -e "console.log(require('web-push').generateVAPIDKeys())"` and keep them stable. Without them a throwaway pair is generated at boot, so devices must re-register after every restart. |
+| `VAPID_SUBJECT` | `mailto:` or `https:` contact URL, e.g. `mailto:admin@example.com`. |
+| `PUSH_STORE_PATH` | Optional. A JSON file path for registered subscriptions. Set it to a mounted persistent disk (for example `/var/data/push-subscriptions.json`) so devices survive restarts and deploys. Without it the list lives in memory and repopulates as devices reopen the app. |
+
+The studio shows the registered device count and warns when keys are temporary
+or the store is memory-only. Broadcasts need a valid admin session, just like
+the AI relay, and expired subscriptions are removed automatically.
+
+---
+
 ## Verifying it locally
 
 ```bash

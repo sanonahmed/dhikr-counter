@@ -75,6 +75,13 @@ function check(name, ok, detail) {
 try {
   await waitForServer();
 
+  const pushConfigResponse = await fetch(`${base}/api/push/config`);
+  const pushConfig = await pushConfigResponse.json();
+  check(
+    'public push config exposes the VAPID public key',
+    pushConfigResponse.ok && pushConfig.enabled === true && typeof pushConfig.publicKey === 'string' && pushConfig.publicKey.length > 20
+  );
+
   const health = await fetch(`${base}/api/health`).then((r) => r.json());
   check('health reports server key', health.ok === true && health.ai.serverKeyConfigured === true, JSON.stringify(health.ai));
   check('health reports admin enabled', health.admin?.enabled === true, JSON.stringify(health.admin));
@@ -115,6 +122,52 @@ try {
     headers: adminHeaders(),
   }).then((r) => r.json());
   check('admin session is recognised', sessionInfo.enabled === true && sessionInfo.authenticated === true, JSON.stringify(sessionInfo));
+
+  const pushStatus = await fetch(`${base}/api/admin/push`, { headers: adminHeaders() }).then((r) => r.json());
+  check('push broadcast starts with no registered devices', pushStatus.subscribers === 0, JSON.stringify(pushStatus));
+
+  const fakeSubscription = {
+    endpoint: 'https://push.example.com/send/abc123',
+    keys: { p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) },
+  };
+  const subscribe = await fetch(`${base}/api/push/subscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription: fakeSubscription }),
+  });
+  check('a device can register a push subscription', subscribe.status === 200, `${subscribe.status}`);
+
+  const pushStatusAfter = await fetch(`${base}/api/admin/push`, { headers: adminHeaders() }).then((r) => r.json());
+  check('registered devices are counted for the admin', pushStatusAfter.subscribers === 1, JSON.stringify(pushStatusAfter));
+
+  const insecureSubscription = await fetch(`${base}/api/push/subscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription: { ...fakeSubscription, endpoint: 'http://push.example.com/x' } }),
+  });
+  check('non-HTTPS push subscriptions are rejected', insecureSubscription.status === 400, `${insecureSubscription.status}`);
+
+  const anonymousBroadcast = await fetch(`${base}/api/admin/push`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'Hi', body: 'There' }),
+  });
+  check('broadcasting requires an admin session', anonymousBroadcast.status === 401, `${anonymousBroadcast.status}`);
+
+  const emptyBroadcast = await fetch(`${base}/api/admin/push`, {
+    method: 'POST',
+    headers: adminHeaders(),
+    body: JSON.stringify({ title: '', body: 'There' }),
+  });
+  check('broadcasting requires a title and message', emptyBroadcast.status === 400, `${emptyBroadcast.status}`);
+
+  const unsubscribe = await fetch(`${base}/api/push/unsubscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint: fakeSubscription.endpoint }),
+  });
+  const pushStatusAfterRemoval = await fetch(`${base}/api/admin/push`, { headers: adminHeaders() }).then((r) => r.json());
+  check('a device can unregister from broadcasts', unsubscribe.status === 200 && pushStatusAfterRemoval.subscribers === 0, JSON.stringify(pushStatusAfterRemoval));
 
   const corsPreflight = await fetch(`${base}/api/ai/chat`, {
     method: 'OPTIONS',

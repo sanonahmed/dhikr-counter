@@ -12,6 +12,14 @@ services:
       # /api/ai/chat refuses all requests, so the AI key cannot be spent.
       - key: ADMIN_PASSCODE
         sync: false
+      # Web Push credentials must be generated once and kept stable across deploys.
+      # Generate with: node -e "console.log(require('web-push').generateVAPIDKeys())"
+      - key: VAPID_PUBLIC_KEY
+        sync: false
+      - key: VAPID_PRIVATE_KEY
+        sync: false
+      - key: VAPID_SUBJECT
+        value: mailto:admin@example.com
       # Optional: how long an admin login lasts before it expires (hours, max 168).
       - key: ADMIN_SESSION_HOURS
         value: "12"

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Bell, Bot, CheckCircle2, LoaderCircle, PlugZap, Send, ShieldAlert, Sparkles, Trash2 } from 'lucide-react';
 import { Button, Card, Input, Textarea } from '../components/ui/Primitives';
-import { getNotificationPermission, requestNotificationPermission, showLocalNotification } from '../utils/notifications';
 import {
   buildNotificationPrompt,
   DRAFT_BODY_LIMIT,
@@ -10,6 +9,8 @@ import {
   parseAiDraft,
   type AiDraft,
 } from '../utils/aiDraft';
+import { getPushStatus, sendPushToAllDevices, type PushStatus } from '../utils/pushNotifications';
+import { getNotificationPermission, requestNotificationPermission } from '../utils/notifications';
 import {
   AI_PROVIDER_PRESETS,
   AI_PROVIDER_STORAGE_KEY,
@@ -54,6 +55,8 @@ export const AdminNotificationsPage: React.FC = () => {
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
   const [proxy, setProxy] = useState<AiProxyStatus | null>(null);
   const [checking, setChecking] = useState(false);
+  const [pushStatus, setPushStatus] = useState<PushStatus | null>(null);
+  const [pushChecking, setPushChecking] = useState(false);
   const update = (patch: Partial<AiProviderConfig>) => setConfig((current) => ({ ...current, ...patch }));
   const providerHost = hostOf(config.baseUrl);
   const siteOrigin = pageOrigin();
@@ -114,6 +117,19 @@ export const AdminNotificationsPage: React.FC = () => {
     return () => { active = false; clearTimeout(timer); };
   }, [config.proxyUrl]);
 
+  const refreshPushStatus = async () => {
+    setPushChecking(true);
+    try {
+      setPushStatus(await getPushStatus());
+    } finally {
+      setPushChecking(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshPushStatus();
+  }, []);
+
   const canRequest = Boolean(config.baseUrl.trim() && config.model.trim() && (config.apiKey.trim() || usesServerKey(config, proxy)));
   const serverKeyReady = usesServerKey(config, proxy);
   const activePreset = AI_PROVIDER_PRESETS.find((preset) => preset.baseUrl && preset.baseUrl === config.baseUrl.trim());
@@ -148,8 +164,14 @@ export const AdminNotificationsPage: React.FC = () => {
     try {
       const permission = getNotificationPermission() === 'default' ? await requestNotificationPermission() : getNotificationPermission();
       if (permission !== 'granted') throw new Error(permission === 'unsupported' ? 'Notifications need a supported browser and secure HTTPS connection.' : 'Notification permission was not granted.');
-      await showLocalNotification(title.trim(), { body: body.trim(), tag: `admin-ai-${Date.now()}` });
-      setNotice({ error: false, text: 'Sent to this device only. This does not broadcast to other users.' });
+      const result = await sendPushToAllDevices(title.trim(), body.trim());
+      setNotice({
+        error: result.failed > 0 || result.total === 0,
+        text: result.total === 0
+          ? 'No devices are registered yet. Each user must open the app, allow notifications, and register their device first.'
+          : `Broadcast sent: ${result.sent} of ${result.total} registered device(s) accepted it${result.failed ? `; ${result.failed} failed` : ''}${result.removed ? `; removed ${result.removed} expired subscription(s)` : ''}.`,
+      });
+      await refreshPushStatus();
     } catch (error) { setNotice({ error: true, text: error instanceof Error ? error.message : 'Could not show notification.' }); }
     finally { setBusy(null); }
   };
@@ -161,7 +183,7 @@ export const AdminNotificationsPage: React.FC = () => {
   const clear = () => { clearAiProvider(); setConfig(DEFAULT_AI_PROVIDER); setNotice({ error: false, text: 'Provider settings and key removed from this device.' }); };
 
   return <div className="max-w-3xl space-y-6">
-    <header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-5 w-5" /></span><div><h1 className="font-display text-3xl font-bold text-[var(--text-primary)]">AI notification studio</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">Connect an AI provider, draft a message, and send it to this device.</p></div></header>
+    <header className="flex items-center gap-3"><span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-5 w-5" /></span><div><h1 className="font-display text-3xl font-bold text-[var(--text-primary)]">AI notification studio</h1><p className="mt-1 text-sm text-[var(--text-secondary)]">Connect an AI provider, draft a message, and broadcast it to registered devices.</p></div></header>
     <Card className="space-y-5">
       <div className="flex items-center justify-between"><div><h2 className="flex items-center gap-2 font-semibold"><PlugZap className="h-4 w-4 text-[var(--accent-primary)]" />AI provider</h2><p className="mt-1 text-xs text-[var(--text-secondary)]">OpenAI-compatible chat completions API</p></div><span className="rounded-full bg-[var(--bg-surface-muted)] px-3 py-1 text-xs">{proxy?.available ? (serverKeyReady ? 'Server key ready' : config.apiKey ? 'Key configured' : 'Server proxy ready') : config.apiKey ? 'Key configured' : 'Not connected'}</span></div>
       <label className="block space-y-1.5 text-xs font-medium">Provider
@@ -209,9 +231,26 @@ export const AdminNotificationsPage: React.FC = () => {
       <label className="block space-y-1.5 text-xs font-medium">What should it say?<Textarea rows={2} maxLength={500} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
       <Button variant="secondary" disabled={busy !== null || !canRequest} onClick={() => void providerAction('generate')}>{busy === 'generate' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Generate with AI</Button>
       <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] p-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-[var(--text-secondary)]">
+            {pushChecking ? 'Checking registered devices…' : pushStatus
+              ? `${pushStatus.subscribers} device(s) registered for broadcasts.`
+              : 'Could not read the registered device count.'}
+          </p>
+          <Button type="button" variant="ghost" size="sm" disabled={pushChecking} onClick={() => void refreshPushStatus()}>
+            {pushChecking ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PlugZap className="h-4 w-4" />}
+            Refresh
+          </Button>
+        </div>
+        {pushStatus && (!pushStatus.vapidKeysStable || !pushStatus.persistentStore) && (
+          <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]">
+            {!pushStatus.vapidKeysStable && 'VAPID keys are temporary and subscriptions will stop working after a server restart. Set stable VAPID keys.'}{' '}
+            {!pushStatus.persistentStore && 'Device registrations are only in memory and will be lost when the server restarts. Configure PUSH_STORE_PATH on persistent storage.'}
+          </p>
+        )}
         <label className="block space-y-1.5 text-xs font-medium">Notification title<Input maxLength={DRAFT_TITLE_LIMIT} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
         <label className="block space-y-1.5 text-xs font-medium">Message<Textarea rows={3} maxLength={DRAFT_BODY_LIMIT} value={body} onChange={(e) => setBody(e.target.value)} /></label>
-        <Button disabled={busy !== null || !title.trim() || !body.trim()} onClick={() => void send()}>{busy === 'send' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <><Bell className="h-4 w-4" /><Send className="h-4 w-4" /></>}Send to this device</Button>
+        <Button disabled={busy !== null || !title.trim() || !body.trim()} onClick={() => void send()}>{busy === 'send' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <><Bell className="h-4 w-4" /><Send className="h-4 w-4" /></>}Broadcast to all devices</Button>
       </div>
     </Card>
     {notice && <p role="status" className={`rounded-xl border p-3 text-sm ${notice.error ? 'border-red-500/30 text-red-700 dark:text-red-300' : 'border-[var(--accent-primary)]/25 text-[var(--accent-primary)]'}`}>{notice.text}</p>}
