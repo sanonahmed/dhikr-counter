@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Download, Share, Smartphone, WifiOff } from 'lucide-react';
+import { Download, Share, Smartphone } from 'lucide-react';
 import { Button, Modal } from './ui/Primitives';
 
 interface PWAInstallControlsProps {
@@ -73,20 +73,5 @@ export const PWAInstallButton: React.FC<{
         </div>
       </Modal>
     </>
-  );
-};
-
-export const PWAStatusOverlays: React.FC<{ isOnline: boolean }> = ({ isOnline }) => {
-  if (isOnline) return null;
-
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="fixed top-3 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl bg-amber-700 text-white px-4 py-2 text-xs font-medium shadow-lg"
-    >
-      <WifiOff className="w-3.5 h-3.5 shrink-0" />
-      <span>Offline Mode · All counts save locally on device</span>
-    </div>
   );
 };

@@ -7,7 +7,6 @@ import { useAppSettings } from './hooks/useAppSettings';
 import { usePWAInstall } from './hooks/usePWAInstall';
 import { useReminderScheduler } from './hooks/useReminders';
 import { Layout } from './components/Layout';
-import { PWAStatusOverlays } from './components/PWAInstallBanner';
 import { NotificationPermissionPrompt } from './components/NotificationPermissionPrompt';
 import { PushMessageBanner } from './components/PushMessageBanner';
 import { DashboardPage } from './pages/DashboardPage';
@@ -359,7 +358,6 @@ export default function App() {
 
       <PushMessageBanner language={settings.language} />
       <NotificationPermissionPrompt language={settings.language} />
-      <PWAStatusOverlays isOnline={pwa.isOnline} />
     </>
   );
 }
