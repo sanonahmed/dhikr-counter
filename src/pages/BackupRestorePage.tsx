@@ -30,13 +30,15 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   const handleExportFullJson = async () => {
-    const [dhikrs, sessions, collections, goals, reminders, presets] = await Promise.all([
+    const [dhikrs, sessions, collections, goals, reminders, presets, salahDays] = await Promise.all([
       db.dhikrs.toArray(),
       db.sessions.toArray(),
       db.collections.toArray(),
       db.goals.toArray(),
       db.reminders.toArray(),
       db.presets.toArray(),
+      db.salahDays.toArray(),
+
     ]);
 
     const payload: BackupPayload = {
@@ -50,6 +52,7 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
       goals,
       reminders,
       presets,
+      salahDays,
     };
 
     downloadTextFile(
@@ -88,7 +91,7 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
     if (mode === 'replace') {
       await db.transaction(
         'rw',
-        [db.dhikrs, db.sessions, db.collections, db.goals, db.reminders, db.presets],
+        [db.dhikrs, db.sessions, db.collections, db.goals, db.reminders, db.presets, db.salahDays],
         async () => {
           await Promise.all([
             db.dhikrs.clear(),
@@ -97,6 +100,7 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
             db.goals.clear(),
             db.reminders.clear(),
             db.presets.clear(),
+            db.salahDays.clear(),
           ]);
           if (data.dhikrs.length) await db.dhikrs.bulkPut(data.dhikrs);
           if (data.sessions.length) await db.sessions.bulkPut(data.sessions);
@@ -104,22 +108,24 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
           if (data.goals.length) await db.goals.bulkPut(data.goals);
           if (data.reminders.length) await db.reminders.bulkPut(data.reminders);
           if (data.presets.length) await db.presets.bulkPut(data.presets);
+          if (data.salahDays.length) await db.salahDays.bulkPut(data.salahDays);
         }
       );
       if (data.settings) onReplaceSettings(data.settings);
       setStatusMessage('Backup restored (existing data replaced).');
     } else {
-      const [curD, curS, curC, curG, curR, curP] = await Promise.all([
+      const [curD, curS, curC, curG, curR, curP, curSalah] = await Promise.all([
         db.dhikrs.toArray(),
         db.sessions.toArray(),
         db.collections.toArray(),
         db.goals.toArray(),
         db.reminders.toArray(),
         db.presets.toArray(),
+        db.salahDays.toArray(),
       ]);
       await db.transaction(
         'rw',
-        [db.dhikrs, db.sessions, db.collections, db.goals, db.reminders, db.presets],
+        [db.dhikrs, db.sessions, db.collections, db.goals, db.reminders, db.presets, db.salahDays],
         async () => {
           await db.dhikrs.bulkPut(mergeById(curD, data.dhikrs));
           await db.sessions.bulkPut(mergeById(curS, data.sessions));
@@ -127,6 +133,7 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
           await db.goals.bulkPut(mergeById(curG, data.goals));
           await db.reminders.bulkPut(mergeById(curR, data.reminders));
           await db.presets.bulkPut(mergeById(curP, data.presets));
+          await db.salahDays.bulkPut(mergeById(curSalah, data.salahDays));
         }
       );
       setStatusMessage('Backup merged cleanly without duplicate records.');
@@ -156,7 +163,7 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
       <Card className="space-y-4">
         <h2 className="text-base font-semibold text-[var(--text-primary)]">Export Local Data</h2>
         <p className="text-sm text-[var(--text-secondary)] leading-relaxed">
-          Your JSON backup includes all custom Dhikr, counting sessions, goals, collections, reminders, counter presets, and settings.
+          Your JSON backup includes all custom Dhikr, counting sessions, goals, collections, reminders, counter presets, Salah check-ins, and settings.
         </p>
         <div className="flex flex-wrap gap-3">
           <Button variant="primary" onClick={() => void handleExportFullJson()}>
@@ -194,7 +201,8 @@ export const BackupRestorePage: React.FC<BackupRestorePageProps> = ({
               <p className="text-xs text-[var(--text-muted)] mt-1 tabular-nums">
                 {validation.summary.dhikrs} Dhikr · {validation.summary.sessions} Sessions ·{' '}
                 {validation.summary.goals} Goals · {validation.summary.collections} Collections ·{' '}
-                {validation.summary.reminders} Reminders · {validation.summary.presets} Presets
+                {validation.summary.reminders} Reminders · {validation.summary.presets} Presets ·{' '}
+                {validation.summary.salahDays} Salah Days
               </p>
             </div>
 

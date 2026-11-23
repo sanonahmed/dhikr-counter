@@ -24,6 +24,9 @@ const CollectionsPage = lazy(() =>
   import('./pages/CollectionsPage').then((m) => ({ default: m.CollectionsPage }))
 );
 const GoalsPage = lazy(() => import('./pages/GoalsPage').then((m) => ({ default: m.GoalsPage })));
+const SalahTrackerPage = lazy(() =>
+  import('./pages/SalahTrackerPage').then((m) => ({ default: m.SalahTrackerPage }))
+);
 const StatisticsPage = lazy(() =>
   import('./pages/StatisticsPage').then((m) => ({ default: m.StatisticsPage }))
 );
@@ -80,6 +83,7 @@ export default function App() {
   const goals = useLiveQuery(() => db.goals.orderBy('createdAt').toArray(), [], []);
   const reminders = useLiveQuery(() => db.reminders.orderBy('time').toArray(), [], []);
   const presets = useLiveQuery(() => db.presets.orderBy('createdAt').reverse().toArray(), [], []);
+  const salahDays = useLiveQuery(() => db.salahDays.orderBy('id').reverse().toArray(), [], []);
 
   const { activeAlert, dismissAlert } = useReminderScheduler(reminders);
 
@@ -269,6 +273,10 @@ export default function App() {
               sessions={sessions}
               dhikrs={dhikrs}
             />
+          )}
+
+          {currentPage === 'salah' && (
+            <SalahTrackerPage language={settings.language} salahDays={salahDays} />
           )}
 
           {currentPage === 'statistics' && (

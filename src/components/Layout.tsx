@@ -12,6 +12,7 @@ import {
   Palette,
   Settings,
   Sparkles,
+  Heart,
   Target,
   Wifi,
   WifiOff,
@@ -109,6 +110,7 @@ export const Layout: React.FC<LayoutProps> = ({
   const primaryTabs: { id: PageRoute; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
     { id: 'home', label: t.nav.home, icon: Home },
     { id: 'counter', label: t.nav.counter, icon: Sparkles },
+    { id: 'salah', label: t.nav.salah, icon: Heart },
     { id: 'library', label: t.nav.library, icon: BookOpen },
     { id: 'statistics', label: t.nav.statistics, icon: BarChart3 },
     { id: 'settings', label: t.nav.settings, icon: Settings },
@@ -290,12 +292,12 @@ export const Layout: React.FC<LayoutProps> = ({
         </main>
       </div>
 
-      {/* Mobile Bottom Tab Bar (5 items: Home, Counter, Library, Statistics, Settings) */}
+      {/* Mobile Bottom Tab Bar (6 items: Home, Counter, Salah, Library, Statistics, Settings) */}
       <nav
         aria-label="Mobile navigation"
         className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-[var(--bg-surface)]/95 backdrop-blur-md border-t border-[var(--border-subtle)] pb-safe"
       >
-        <div className="grid grid-cols-5 h-16 max-w-lg mx-auto">
+        <div className="grid grid-cols-6 h-16 max-w-lg mx-auto">
           {primaryTabs.map((item) => {
             const Icon = item.icon;
             const active = isTabActive(item.id);
@@ -311,7 +313,7 @@ export const Layout: React.FC<LayoutProps> = ({
                 )}
               >
                 <Icon className="w-5 h-5" />
-                <span className="text-[11px] leading-none truncate max-w-[64px]">{item.label}</span>
+                <span className="text-[11px] leading-none truncate max-w-[58px]">{item.label}</span>
               </button>
             );
           })}

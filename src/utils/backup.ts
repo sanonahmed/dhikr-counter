@@ -1,4 +1,4 @@
-import type { BackupPayload, CountingSession } from '../types/dhikr';
+import type { BackupPayload, CountingSession, SalahDay } from '../types/dhikr';
 import { getSessionNetCount } from './analytics';
 
 export const BACKUP_SCHEMA_VERSION = 1;
@@ -14,6 +14,7 @@ export interface BackupValidationResult {
     goals: number;
     reminders: number;
     presets: number;
+    salahDays: number;
   };
 }
 
@@ -43,6 +44,17 @@ export function validateBackupJson(rawText: string): BackupValidationResult {
       goals: Array.isArray(parsed.goals) ? parsed.goals : [],
       reminders: Array.isArray(parsed.reminders) ? parsed.reminders : [],
       presets: Array.isArray(parsed.presets) ? parsed.presets : [],
+      salahDays: Array.isArray(parsed.salahDays)
+        ? parsed.salahDays.filter(
+            (day: unknown): day is SalahDay =>
+              day !== null &&
+              typeof day === 'object' &&
+              'id' in day &&
+              'statuses' in day &&
+              typeof day.id === 'string' &&
+              /^\d{4}-\d{2}-\d{2}$/.test(day.id)
+          )
+        : [],
     };
 
     return {
@@ -55,6 +67,7 @@ export function validateBackupJson(rawText: string): BackupValidationResult {
         goals: payload.goals.length,
         reminders: payload.reminders.length,
         presets: payload.presets.length,
+        salahDays: payload.salahDays.length,
       },
     };
   } catch {

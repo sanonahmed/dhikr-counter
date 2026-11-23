@@ -32,6 +32,7 @@ export type PageRoute =
   | 'custom-dhikr'
   | 'collections'
   | 'goals'
+  | 'salah'
   | 'statistics'
   | 'history'
   | 'customization'
@@ -121,6 +122,23 @@ export interface ReminderItem {
   createdAt: number;
 }
 
+export type SalahPrayer = 'fajr' | 'dhuhr' | 'asr' | 'maghrib' | 'isha';
+export type SalahStatus = 'prayed' | 'missed' | 'excused';
+
+export type SalahPrayerStatuses = Record<SalahPrayer, SalahStatus | undefined>;
+
+/**
+ * One local day of user-recorded Salah check-ins.
+ * This is a private self-tracking record; it does not claim to determine
+ * whether a prayer was valid or accepted.
+ */
+export interface SalahDay {
+  id: string; // YYYY-MM-DD local date
+  statuses: SalahPrayerStatuses;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface CustomThemeColors {
   canvas: string;
   surface: string;
@@ -179,4 +197,5 @@ export interface BackupPayload {
   goals: GoalItem[];
   reminders: ReminderItem[];
   presets: CounterPreset[];
+  salahDays: SalahDay[];
 }

@@ -1,0 +1,143 @@
+import React, { useState } from 'react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Info, Shield, X } from 'lucide-react';
+import type { Language, SalahDay, SalahPrayer, SalahPrayerStatuses, SalahStatus } from '../types/dhikr';
+import { db } from '../db/database';
+import { getTranslations } from '../i18n/translations';
+import { addDays, formatGregorianDate, fromLocalDayKey, toLocalDayKey } from '../utils/dateUtils';
+import { Button, Card, Input } from '../components/ui/Primitives';
+import { cn } from '../utils/cn';
+
+const PRAYERS: SalahPrayer[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
+const OPTIONS: SalahStatus[] = ['prayed', 'missed', 'excused'];
+const blankStatuses = (): SalahPrayerStatuses => ({ fajr: undefined, dhuhr: undefined, asr: undefined, maghrib: undefined, isha: undefined });
+const getStatuses = (day?: SalahDay): SalahPrayerStatuses => ({ ...blankStatuses(), ...(day?.statuses ?? {}) });
+
+function formatDay(dayKey: string, language: Language): string {
+  try {
+    return new Intl.DateTimeFormat(language === 'bn' ? 'bn-BD' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' }).format(fromLocalDayKey(dayKey));
+  } catch { return dayKey; }
+}
+
+function dotColor(status?: SalahStatus): string {
+  if (status === 'prayed') return 'bg-[var(--accent-primary)]';
+  if (status === 'missed') return 'bg-red-500';
+  if (status === 'excused') return 'bg-[var(--accent-gold)]';
+  return 'bg-[var(--border-strong)]';
+}
+
+function optionStyle(status: SalahStatus, active: boolean): string {
+  if (!active) return 'border-[var(--border-subtle)] text-[var(--text-muted)] hover:bg-[var(--accent-soft)]';
+  if (status === 'prayed') return 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]';
+  if (status === 'missed') return 'border-red-600 bg-red-600 text-white';
+  return 'border-[var(--accent-gold)] bg-[var(--accent-gold)] text-white';
+}
+
+interface SalahTrackerPageProps { language: Language; salahDays: SalahDay[] }
+
+export const SalahTrackerPage: React.FC<SalahTrackerPageProps> = ({ language, salahDays }) => {
+  const t = getTranslations(language);
+  const todayKey = toLocalDayKey();
+  const [selectedDay, setSelectedDay] = useState(todayKey);
+  const [savingPrayer, setSavingPrayer] = useState<SalahPrayer | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const daysByKey = new Map(salahDays.map((day) => [day.id, day]));
+  const statuses = getStatuses(daysByKey.get(selectedDay));
+  const prayedCount = PRAYERS.filter((prayer) => statuses[prayer] === 'prayed').length;
+  const historyKeys = Array.from({ length: 7 }, (_, i) => addDays(todayKey, i - 6));
+  const completeDays = historyKeys.filter((key) => PRAYERS.every((prayer) => getStatuses(daysByKey.get(key))[prayer] === 'prayed')).length;
+
+  const changeStatus = async (prayer: SalahPrayer, status: SalahStatus) => {
+    if (savingPrayer) return;
+    setSavingPrayer(prayer);
+    setError(null);
+    try {
+      const existing = await db.salahDays.get(selectedDay);
+      const nextStatuses = getStatuses(existing);
+      nextStatuses[prayer] = nextStatuses[prayer] === status ? undefined : status;
+      const now = Date.now();
+      if (Object.values(nextStatuses).some(Boolean)) {
+        await db.salahDays.put({ id: selectedDay, statuses: nextStatuses, createdAt: existing?.createdAt ?? now, updatedAt: now });
+      } else if (existing) {
+        await db.salahDays.delete(selectedDay);
+      }
+    } catch { setError(t.salah.saveError); }
+    finally { setSavingPrayer(null); }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div>
+          <h1 className="font-display text-3xl font-bold text-[var(--text-primary)]">{t.salah.title}</h1>
+          <p className="text-sm text-[var(--text-secondary)] mt-1">{t.salah.subtitle}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="icon" onClick={() => setSelectedDay(addDays(selectedDay, -1))} aria-label={t.salah.previousDay}><ChevronLeft className="w-4 h-4" /></Button>
+          <Input type="date" value={selectedDay} max={todayKey} aria-label={t.salah.pickDate} onChange={(e) => { if (e.target.value && e.target.value <= todayKey) setSelectedDay(e.target.value); }} className="w-[148px]" />
+          <Button variant="outline" size="icon" onClick={() => setSelectedDay(addDays(selectedDay, 1))} disabled={selectedDay >= todayKey} aria-label={t.salah.nextDay}><ChevronRight className="w-4 h-4" /></Button>
+          {selectedDay !== todayKey && <Button variant="ghost" size="sm" onClick={() => setSelectedDay(todayKey)}>{t.salah.today}</Button>}
+        </div>
+      </div>
+      {error && <div role="alert" className="rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-600">{error}</div>}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
+        <Card className="lg:col-span-2 p-0 overflow-hidden">
+          <div className="px-5 pt-5 pb-4 space-y-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold text-[var(--text-primary)]">{selectedDay === todayKey ? t.salah.today : formatDay(selectedDay, language)}</h2>
+                <p className="text-xs text-[var(--text-muted)] mt-0.5">{formatGregorianDate(fromLocalDayKey(selectedDay), language)}</p>
+              </div>
+              <div className="text-right shrink-0"><p className="text-xs text-[var(--text-muted)]">{t.salah.dailyProgress}</p><p className="text-xl font-semibold font-mono-num text-[var(--text-primary)] mt-0.5">{prayedCount} <span className="text-xs font-normal text-[var(--text-muted)]">{t.salah.ofFive}</span></p></div>
+            </div>
+            <div className="h-2.5 w-full rounded-full bg-[var(--bg-surface-muted)] overflow-hidden" role="progressbar" aria-valuemin={0} aria-valuemax={5} aria-valuenow={prayedCount} aria-label={t.salah.dailyProgress}>
+              <div className="h-full rounded-full transition-all duration-300" style={{ width: `${prayedCount * 20}%`, backgroundColor: prayedCount === 5 ? 'var(--accent-gold)' : 'var(--accent-primary)' }} />
+            </div>
+            <p className="text-xs text-[var(--text-muted)]">{t.salah.recordHint} {t.counter.savedLocally}</p>
+          </div>
+          <div className="border-t border-[var(--border-subtle)] divide-y divide-[var(--border-subtle)]">
+            {PRAYERS.map((prayer) => {
+              const status = statuses[prayer];
+              const iconClass = status === 'prayed' ? 'border-[var(--accent-primary)] bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]' : status === 'missed' ? 'border-red-500/30 bg-red-500/10 text-red-600' : status === 'excused' ? 'border-[var(--border-strong)] bg-[var(--bg-surface-muted)] text-[var(--text-secondary)]' : 'border-[var(--border-strong)] text-[var(--text-muted)]';
+              return (
+                <div key={prayer} className="px-4 sm:px-5 py-3.5 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <span className={cn('h-8 w-8 rounded-full border inline-flex items-center justify-center shrink-0', iconClass)} aria-hidden="true">
+                      {status === 'prayed' ? <Check className="w-4 h-4" /> : status === 'missed' ? <X className="w-4 h-4" /> : status === 'excused' ? <Shield className="w-4 h-4" /> : <span className="h-1.5 w-1.5 rounded-full bg-[var(--text-muted)]" />}
+                    </span>
+                    <div className="min-w-0"><p className="text-sm font-semibold text-[var(--text-primary)]">{t.salah.prayers[prayer]}</p><p className="text-[11px] text-[var(--text-muted)]">{status ? t.salah.statuses[status] : t.salah.statuses.unrecorded}</p></div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5 sm:flex sm:items-center" role="group" aria-label={t.salah.prayers[prayer]}>
+                    {OPTIONS.map((option) => <button key={option} type="button" onClick={() => void changeStatus(prayer, option)} aria-pressed={status === option} disabled={savingPrayer === prayer} className={cn('min-h-[36px] px-2.5 rounded-lg border text-[11px] font-medium transition-colors cursor-pointer disabled:opacity-50 disabled:pointer-events-none', optionStyle(option, status === option))}>{t.salah.statuses[option]}</button>)}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </Card>
+
+        <Card className="space-y-4">
+          <div>
+            <h2 className="text-base font-semibold text-[var(--text-primary)] flex items-center gap-2"><CalendarDays className="w-4 h-4 text-[var(--accent-primary)]" aria-hidden="true" />{t.salah.weekTitle}</h2>
+            <p className="text-xs text-[var(--text-muted)] mt-1">{t.salah.weekSubtitle}</p>
+          </div>
+          <div className="space-y-2">
+            {historyKeys.map((dayKey) => {
+              const dayStatuses = getStatuses(daysByKey.get(dayKey));
+              const count = PRAYERS.filter((prayer) => dayStatuses[prayer] === 'prayed').length;
+              const marked = PRAYERS.filter((prayer) => dayStatuses[prayer] !== undefined).length;
+              const complete = count === PRAYERS.length;
+              return (
+                <button key={dayKey} type="button" onClick={() => setSelectedDay(dayKey)} aria-pressed={dayKey === selectedDay} className={cn('w-full flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl border text-left transition-colors cursor-pointer', dayKey === selectedDay ? 'border-[var(--accent-primary)] bg-[var(--accent-soft)]' : 'border-[var(--border-subtle)] bg-[var(--bg-canvas)] hover:bg-[var(--accent-soft)]')}>
+                  <span className="min-w-0"><span className="block text-sm font-medium text-[var(--text-primary)] truncate">{formatDay(dayKey, language)}</span><span className="block text-[11px] text-[var(--text-muted)]">{dayKey === todayKey ? t.salah.today : complete ? t.salah.complete : `${marked}/5 ${t.salah.prayersMarked}`}</span></span>
+                  <span className="flex items-center gap-1 shrink-0" aria-hidden="true">{PRAYERS.map((prayer) => <span key={prayer} className={cn('h-2.5 w-2.5 rounded-full', dotColor(dayStatuses[prayer]))} />)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="pt-3 border-t border-[var(--border-subtle)]"><p className="text-xs text-[var(--text-muted)]">{completeDays}/7 {t.salah.daysComplete}</p></div>
+        </Card>
+      </div>
+      <p className="text-xs text-[var(--text-muted)] flex items-start gap-2 leading-relaxed"><Info className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" /><span>{t.salah.personalNote}</span></p>
+    </div>
+  );
+};

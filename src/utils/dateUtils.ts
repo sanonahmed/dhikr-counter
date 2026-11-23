@@ -15,6 +15,11 @@ export function addDays(dayKey: string, deltaDays: number): string {
   return toLocalDayKey(dt);
 }
 
+export function fromLocalDayKey(dayKey: string): Date {
+  const [year, month, day] = dayKey.split('-').map(Number);
+  return new Date(year, month - 1, day);
+}
+
 export function formatGregorianDate(date: Date, lang: Language): string {
   try {
     return new Intl.DateTimeFormat(lang === 'bn' ? 'bn-BD' : 'en-US', {

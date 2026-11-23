@@ -6,6 +6,7 @@ import type {
   DhikrItem,
   GoalItem,
   ReminderItem,
+  SalahDay,
 } from '../types/dhikr';
 import { PREBUILT_DHIKR } from '../data/prebuiltDhikr';
 
@@ -16,6 +17,7 @@ export class DhikrCounterDB extends Dexie {
   goals!: Table<GoalItem, string>;
   reminders!: Table<ReminderItem, string>;
   presets!: Table<CounterPreset, string>;
+  salahDays!: Table<SalahDay, string>;
 
   constructor() {
     super('DhikrCounterDB');
@@ -26,6 +28,15 @@ export class DhikrCounterDB extends Dexie {
       goals: 'id, period, scope, isActive, createdAt',
       reminders: 'id, enabled, presetType, time',
       presets: 'id, name, createdAt',
+    });
+    this.version(2).stores({
+      dhikrs: 'id, category, isFavorite, sortOrder, sourceType, updatedAt',
+      sessions: 'id, dhikrId, category, dayKey, status, startTime, lastUpdatedAt',
+      collections: 'id, name, createdAt',
+      goals: 'id, period, scope, isActive, createdAt',
+      reminders: 'id, enabled, presetType, time',
+      presets: 'id, name, createdAt',
+      salahDays: 'id, updatedAt',
     });
   }
 }
