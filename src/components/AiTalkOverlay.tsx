@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, LoaderCircle, Mic, MicOff, Plus, Volume2, VolumeX, X } from 'lucide-react';
+import { LoaderCircle, Mic, MicOff, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import type { Language } from '../types/dhikr';
 import { getTranslations } from '../i18n/translations';
 import { resolveAdminServerUrl } from '../utils/adminSession';
@@ -21,6 +21,17 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 type SpeechRecognitionWindow = Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor; };
 
 function chatEndpoint(): string { return `${resolveAdminServerUrl()}/api/ai/talk`; }
+
+/** A quiet eight-point Islamic star used as the assistant's mark. */
+function SacredMark({ className = '' }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.25" aria-hidden="true" className={className}>
+      <rect x="9" y="9" width="30" height="30" rx="2" />
+      <rect x="9" y="9" width="30" height="30" rx="2" transform="rotate(45 24 24)" />
+      <circle cx="24" cy="24" r="3.5" />
+    </svg>
+  );
+}
 
 export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, language }) => {
   const t = getTranslations(language).aiTalk;
@@ -342,10 +353,19 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   };
 
   const visibleTranscript = [pendingText, interim].filter(Boolean).join(' ');
+  const statusText = busy
+    ? t.thinking
+    : listening
+      ? t.listening
+      : continuousMode
+        ? t.stopListening
+        : messages.length > 0
+          ? t.tapToReply
+          : t.tapToSpeak;
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-4"
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-[#020806]/80 backdrop-blur-md sm:items-center sm:p-6"
       role="presentation"
       onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
@@ -353,67 +373,68 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
         role="dialog"
         aria-modal="true"
         aria-labelledby="ai-talk-title"
-        className="flex h-[min(92dvh,780px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl sm:rounded-3xl"
+        className="relative flex h-[min(94dvh,860px)] w-full max-w-3xl flex-col overflow-hidden rounded-t-[2rem] border border-white/10 bg-[#08130f] text-[#f4f2e9] shadow-[0_32px_100px_-24px_rgba(0,0,0,0.85)] sm:rounded-[2rem]"
       >
-        <header className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3 sm:px-5">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent-primary)]">
-            <Bot className="h-5 w-5" />
+        <div className="ai-talk-pattern pointer-events-none absolute inset-0 opacity-80" aria-hidden="true" />
+        <header className="relative z-10 flex min-h-[76px] items-center gap-3 border-b border-white/[0.08] px-4 sm:px-7">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#d4a853]/30 bg-[#d4a853]/[0.08] text-[#e0bd70]">
+            <SacredMark className="h-6 w-6" />
           </span>
-          <div className="min-w-0 flex-1">
-            <h2 id="ai-talk-title" className="font-display text-lg font-bold text-[var(--text-primary)]">{t.title}</h2>
-            <p className="text-xs text-[var(--text-secondary)]">{t.subtitle}</p>
-          </div>
-          <label className="hidden items-center gap-1.5 text-xs text-[var(--text-muted)] sm:flex">
-            <span>{t.language}</span>
+          <h2 id="ai-talk-title" className="min-w-0 flex-1 font-display text-xl font-semibold tracking-wide text-[#f5f0df]">{t.title}</h2>
+          <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-1.5 text-xs text-[#b6c1b9]">
+            <span className="sr-only">{t.language}</span>
             <select
               value={replyLanguage}
               onChange={(event) => setReplyLanguage(event.target.value as Language)}
-              className="min-h-9 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 text-[var(--text-primary)]"
+              className="min-h-8 cursor-pointer border-0 bg-transparent text-xs font-medium text-[#e8e2d2] outline-none"
               aria-label={t.language}
             >
-              <option value="bn">{t.bangla}</option>
-              <option value="en">{t.english}</option>
+              <option className="bg-[#08130f]" value="bn">{t.bangla}</option>
+              <option className="bg-[#08130f]" value="en">{t.english}</option>
             </select>
           </label>
-          <button type="button" onClick={onClose} aria-label={t.close} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-primary)]">
+          {messages.length > 0 && (
+            <button type="button" onClick={clearConversation} aria-label={t.clear} title={t.clear} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 text-[#a5b2aa] transition-colors hover:border-[#d4a853]/30 hover:bg-[#d4a853]/10 hover:text-[#e0bd70]">
+              <Plus className="h-4 w-4" />
+            </button>
+          )}
+          <button type="button" onClick={onClose} aria-label={t.close} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[#93a197] transition-colors hover:bg-white/[0.07] hover:text-white">
             <X className="h-5 w-5" />
           </button>
         </header>
 
-        <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-4 py-2 sm:hidden">
-          <span className="text-xs text-[var(--text-muted)]">{t.language}</span>
-          <button type="button" onClick={() => setReplyLanguage('bn')} aria-pressed={replyLanguage === 'bn'} className={cn('rounded-lg px-3 py-1.5 text-xs font-medium', replyLanguage === 'bn' ? 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]' : 'text-[var(--text-secondary)] hover:bg-[var(--accent-soft)]')}>{t.bangla}</button>
-          <button type="button" onClick={() => setReplyLanguage('en')} aria-pressed={replyLanguage === 'en'} className={cn('rounded-lg px-3 py-1.5 text-xs font-medium', replyLanguage === 'en' ? 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]' : 'text-[var(--text-secondary)] hover:bg-[var(--accent-soft)]')}>{t.english}</button>
-          <button type="button" onClick={clearConversation} aria-label={t.clear} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-soft)]">
-            <Plus className="h-4 w-4" />{t.clear}
-          </button>
-        </div>
-
-        <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6" aria-live="polite" aria-relevant="additions text">
+        <div ref={listRef} className="relative z-10 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7" aria-live="polite" aria-relevant="additions text">
           {messages.length === 0 && (
-            <div className="mx-auto flex max-w-md flex-col items-center py-8 text-center">
-              <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-7 w-7" /></span>
-              <p className="text-sm leading-relaxed text-[var(--text-primary)]">{t.welcome}</p>
-              <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{t.voiceOnly}</p>
+            <div className="flex h-full min-h-[250px] flex-col items-center justify-center pb-4 text-center">
+              <div className="relative mb-7 flex h-36 w-36 items-center justify-center sm:h-44 sm:w-44">
+                <span className="ai-talk-rotate absolute inset-0 rounded-full border border-dashed border-[#d4a853]/25" aria-hidden="true" />
+                <span className="absolute inset-[13px] rounded-full border border-[#d4a853]/20" aria-hidden="true" />
+                <span className="absolute inset-[25px] rounded-full bg-[radial-gradient(circle,rgba(212,168,83,0.14),rgba(9,33,24,0.2)_68%,transparent_70%)]" aria-hidden="true" />
+                <SacredMark className="relative h-12 w-12 text-[#d7b76d] sm:h-14 sm:w-14" />
+              </div>
+              <span className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#d4a853]/20 bg-[#d4a853]/[0.06] px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-[#d4bc83]">
+                <span className={cn('h-1.5 w-1.5 rounded-full', listening ? 'animate-pulse bg-emerald-400' : 'bg-[#d4a853]')} />
+                {statusText}
+              </span>
+              {voiceError && <p role="status" className="mt-2 max-w-sm text-center text-xs leading-relaxed text-amber-200">{voiceError}</p>}
+              {requestError && <p role="alert" className="mt-2 max-w-sm text-center text-xs leading-relaxed text-rose-300">{requestError}</p>}
             </div>
           )}
 
           {messages.map((message) => (
-            <div key={message.id} className={cn('flex gap-2.5', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+            <div key={message.id} className={cn('flex gap-3', message.role === 'user' ? 'justify-end' : 'justify-start')}>
               {message.role === 'assistant' && (
-                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-4 w-4" /></span>
+                <span className="mt-1 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-[#d4a853]/20 bg-[#d4a853]/[0.06] text-[#d7b76d]">
+                  <SacredMark className="h-4 w-4" />
+                </span>
               )}
-              <div className={cn('max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]', message.role === 'user' ? 'rounded-br-md bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]' : 'rounded-bl-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)]')}>
+              <div className={cn('max-w-[88%] rounded-2xl px-4 py-3.5 text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere] sm:max-w-[78%]', message.role === 'user' ? 'rounded-br-md border border-[#d4a853]/20 bg-[#d4a853]/[0.10] text-[#f2ead6]' : 'rounded-bl-md border border-white/[0.08] bg-white/[0.045] text-[#e8ebe5]')}>
                 {message.content}
                 {message.role === 'assistant' && (
                   <div className="mt-2 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => speak(message)}
-                      aria-label={speakingId === message.id ? t.stopSpeaking : t.playAloud}
-                      title={speakingId === message.id ? t.stopSpeaking : t.playAloud}
-                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-primary)]"
-                    >{speakingId === message.id ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}</button>
+                    <button type="button" onClick={() => speak(message)} aria-label={speakingId === message.id ? t.stopSpeaking : t.playAloud} title={speakingId === message.id ? t.stopSpeaking : t.playAloud} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#9aa89f] transition-colors hover:bg-[#d4a853]/10 hover:text-[#e0bd70]">
+                      {speakingId === message.id ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
+                    </button>
                   </div>
                 )}
               </div>
@@ -421,42 +442,38 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
           ))}
 
           {busy && (
-            <div className="flex items-center gap-2.5 text-sm text-[var(--text-muted)]" role="status">
-              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-4 w-4" /></span>
-              <span className="inline-flex items-center gap-2"><LoaderCircle className="h-4 w-4 animate-spin" />{t.thinking}</span>
+            <div className="flex items-center gap-3 text-sm text-[#b5c0b8]" role="status">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl border border-[#d4a853]/20 bg-[#d4a853]/[0.06] text-[#d7b76d]"><SacredMark className="h-4 w-4" /></span>
+              <span className="inline-flex items-center gap-2"><LoaderCircle className="h-4 w-4 animate-spin text-[#d4b866]" />{t.thinking}</span>
             </div>
           )}
-          {requestError && <p role="alert" className="rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs leading-relaxed text-red-700 dark:text-red-300">{requestError}</p>}
+          {requestError && messages.length > 0 && <p role="alert" className="rounded-xl border border-rose-400/20 bg-rose-400/[0.06] px-3 py-2 text-xs leading-relaxed text-rose-200">{requestError}</p>}
           {visibleTranscript && (
             <div className="flex justify-end">
-              <div className="max-w-[88%] rounded-2xl rounded-br-md border border-[var(--accent-primary)]/60 bg-[var(--accent-primary)]/10 px-4 py-3 text-sm leading-relaxed text-[var(--text-primary)] [overflow-wrap:anywhere]">{visibleTranscript}</div>
+              <div className="max-w-[88%] rounded-2xl rounded-br-md border border-[#d4a853]/25 bg-[#d4a853]/[0.08] px-4 py-3 text-sm leading-relaxed text-[#f2ead6] [overflow-wrap:anywhere]">{visibleTranscript}</div>
             </div>
           )}
-          {listening && !visibleTranscript && <p className="text-center text-xs text-[var(--accent-primary)]" role="status">{t.listening}</p>}
+          {listening && !visibleTranscript && messages.length > 0 && <p className="text-center text-xs text-[#d4bc83]" role="status">{t.listening}</p>}
+          {voiceError && messages.length > 0 && <p role="status" className="text-center text-xs leading-relaxed text-amber-200">{voiceError}</p>}
         </div>
 
-        <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pb-safe pt-3 sm:px-5">
-          <div className="flex flex-col items-center gap-2 pb-3">
-            <button
-              ref={micRef}
-              type="button"
-              onClick={continuousMode ? stopListening : startListening}
-              aria-label={continuousMode ? t.stopListening : t.startListening}
-              title={continuousMode ? t.stopListening : t.startListening}
-              className={cn('inline-flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition-all', continuousMode ? 'animate-pulse bg-red-600 text-white ring-4 ring-red-500/20' : 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] hover:scale-105')}
-            >{continuousMode ? <MicOff className="h-7 w-7" /> : busy ? <LoaderCircle className="h-7 w-7 animate-spin" /> : <Mic className="h-7 w-7" />}</button>
-            <p className="text-center text-xs text-[var(--text-secondary)]">{busy ? t.thinking : continuousMode ? (listening ? t.stopListening : replyLanguage === 'bn' ? 'প্রতিটি উত্তরের পর আবার শুনব। বন্ধ করতে মাইক্রোফোনে ট্যাপ করুন।' : 'Hands-free is on. I will listen again after each answer. Tap to stop.') : messages.length > 0 ? t.tapToReply : t.tapToSpeak}</p>
+        <footer className="relative z-10 border-t border-white/[0.08] bg-[#07100d]/75 px-4 pb-safe pt-4 sm:px-7 sm:pt-5">
+          <div className="flex flex-col items-center gap-3 pb-3">
+            <div className="relative flex h-[76px] w-[76px] items-center justify-center">
+              <span className={cn('absolute inset-0 rounded-full border transition-all duration-500', continuousMode ? 'scale-125 border-emerald-300/30' : 'border-[#d4a853]/20')} aria-hidden="true" />
+              <span className={cn('absolute inset-[6px] rounded-full border border-[#d4a853]/15', continuousMode && listening && 'ai-talk-breathe-fast')} aria-hidden="true" />
+              <button
+                ref={micRef}
+                type="button"
+                onClick={continuousMode ? stopListening : startListening}
+                aria-label={continuousMode ? t.stopListening : t.startListening}
+                title={continuousMode ? t.stopListening : t.startListening}
+                disabled={busy}
+                className={cn('ai-talk-breathe relative inline-flex h-[60px] w-[60px] items-center justify-center rounded-full border border-[#e2c779]/50 bg-[radial-gradient(circle_at_38%_28%,#34745c,#123729_54%,#081b13)] text-[#f2d995] transition-all duration-300 hover:scale-[1.04] disabled:cursor-wait disabled:opacity-75', continuousMode && 'border-emerald-200/50 text-emerald-100')}
+              >{continuousMode ? <MicOff className="h-6 w-6" /> : busy ? <LoaderCircle className="h-6 w-6 animate-spin" /> : <Mic className="h-6 w-6" />}</button>
+            </div>
+            <p className="min-h-4 text-center text-[11px] tracking-wide text-[#c5cbbd]" role="status">{statusText}</p>
           </div>
-          <div className="flex items-start justify-between gap-3 py-2">
-            <p className="max-w-xl text-[10px] leading-relaxed text-[var(--text-muted)]">{t.disclaimer}</p>
-            <button
-              type="button"
-              onClick={clearConversation}
-              aria-label={t.clear}
-              className="hidden shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] sm:inline-flex"
-            >{t.clear}</button>
-          </div>
-          {voiceError && <p role="status" className="pb-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">{voiceError}</p>}
         </footer>
       </section>
     </div>
