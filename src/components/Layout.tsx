@@ -2,7 +2,6 @@ import React from 'react';
 import {
   BarChart3,
   Bell,
-  Bot,
   BookOpen,
   Clock,
   FolderHeart,
@@ -10,6 +9,7 @@ import {
   Home,
   Info,
   Palette,
+  PenLine,
   Settings,
   Sparkles,
   Heart,
@@ -169,21 +169,6 @@ export const Layout: React.FC<LayoutProps> = ({
 
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6" aria-label="Main navigation">
           <div className="space-y-2">
-            <button
-              type="button"
-              onClick={onToggleAiTalk}
-              aria-haspopup="dialog"
-              aria-expanded={aiTalkOpen}
-              className={cn(
-                'w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-semibold transition-colors cursor-pointer',
-                aiTalkOpen
-                  ? 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]'
-                  : 'bg-[var(--accent-soft)] text-[var(--accent-primary)] hover:opacity-80'
-              )}
-            >
-              <Bot className="w-4 h-4 shrink-0" />
-              <span>{t.nav.aiTalk}</span>
-            </button>
             {primaryTabs.map((item) => {
               const Icon = item.icon;
               const active = currentPage === item.id;
@@ -271,17 +256,6 @@ export const Layout: React.FC<LayoutProps> = ({
                 <WifiOff className="w-3.5 h-3.5 text-amber-600" aria-label="Offline" />
               )}
             </span>
-            <button
-              type="button"
-              onClick={onToggleAiTalk}
-              aria-label={t.nav.aiTalk}
-              aria-haspopup="dialog"
-              aria-expanded={aiTalkOpen}
-              className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-primary)] text-xs font-semibold cursor-pointer"
-            >
-              <Bot className="w-4 h-4" />
-              <span>{t.nav.aiTalk}</span>
-            </button>
             <PWAInstallButton
               isInstallable={isInstallable}
               isInstalled={isInstalled}
@@ -324,6 +298,19 @@ export const Layout: React.FC<LayoutProps> = ({
           })}
         </div>
       </nav>
+
+      {currentPage === 'home' && (
+        <button
+          type="button"
+          onClick={onToggleAiTalk}
+          aria-label={t.nav.aiTalk}
+          aria-haspopup="dialog"
+          aria-expanded={aiTalkOpen}
+          className="fixed right-5 bottom-[calc(4rem+env(safe-area-inset-bottom)+1rem)] lg:bottom-6 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] shadow-[var(--shadow-counter)] transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-primary)] active:scale-95 cursor-pointer"
+        >
+          <PenLine className="h-6 w-6" aria-hidden="true" />
+        </button>
+      )}
 
       <AiTalkOverlay
         open={aiTalkOpen}
