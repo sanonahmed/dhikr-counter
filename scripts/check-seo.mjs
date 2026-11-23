@@ -13,6 +13,7 @@ const files = new Map([
   ['/privacy.html', read(path.join(publicDir, 'privacy.html'))],
   ['/guides/digital-tasbih.html', read(path.join(publicDir, 'guides', 'digital-tasbih.html'))],
   ['/guides/daily-dhikr.html', read(path.join(publicDir, 'guides', 'daily-dhikr.html'))],
+  ['/developers/sawon-ahmed.html', read(path.join(publicDir, 'developers', 'sawon-ahmed.html'))],
 ]);
 const sitemap = read(path.join(publicDir, 'sitemap.xml'));
 const robots = read(path.join(publicDir, 'robots.txt'));
@@ -49,8 +50,12 @@ for (const [route, html] of files) {
   check(/<meta\s+name="robots"\s+content="index\s*,\s*follow/i.test(html), `${label}: missing index, follow robots directive.`);
   check(html.includes('og:title') && html.includes('og:description') && html.includes('og:image'), `${label}: missing social preview title, description, or image.`);
   check(html.includes(`property="og:url" content="${canonical}"`), `${label}: Open Graph URL must match the canonical URL.`);
-  check(html.includes(`${origin}/social-preview.png`), `${label}: social image must use the production image URL.`);
-  check(/property="og:image:width" content="1200"/.test(html) && /property="og:image:height" content="630"/.test(html), `${label}: Open Graph image dimensions must be specified as 1200 × 630.`);
+  const expectedSocialImage = route === '/developers/sawon-ahmed.html' ? `${origin}/developers/sawonahmed.jpg` : `${origin}/social-preview.png`;
+  check(html.includes(expectedSocialImage), `${label}: social image must use the expected production image URL.`);
+  const expectedImageDimensions = route === '/developers/sawon-ahmed.html'
+    ? /property="og:image:width" content="1612"/.test(html) && /property="og:image:height" content="2015"/.test(html)
+    : /property="og:image:width" content="1200"/.test(html) && /property="og:image:height" content="630"/.test(html);
+  check(expectedImageDimensions, `${label}: Open Graph image dimensions must match the selected production image.`);
   check(/property="og:image:alt" content="[^"]+"/.test(html), `${label}: Open Graph image must have accessible alt text.`);
   check(/name="twitter:card" content="summary_large_image"/.test(html), `${label}: missing large-image Twitter card.`);
   check(/name="twitter:title" content="[^"]+"/.test(html) && /name="twitter:description" content="[^"]+"/.test(html), `${label}: missing Twitter title or description.`);
@@ -93,7 +98,7 @@ for (const url of sitemapUrls) {
   check(canonical === url, `Sitemap URL ${url} does not match that page's canonical URL.`);
 }
 
-for (const required of ['/features.html', '/privacy.html', '/guides/digital-tasbih.html', '/guides/daily-dhikr.html']) {
+for (const required of ['/features.html', '/privacy.html', '/guides/digital-tasbih.html', '/guides/daily-dhikr.html', '/developers/sawon-ahmed.html']) {
   check(sitemapUrls.includes(`${origin}${required}`), `Sitemap does not include public guide ${required}.`);
 }
 for (const blocked of ['/settings', '/admin', '/counter', '/api/health']) {
