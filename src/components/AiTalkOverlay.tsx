@@ -23,6 +23,8 @@ type SpeechRecognitionWindow = Window & { SpeechRecognition?: SpeechRecognitionC
 
 function chatEndpoint(): string { return `${resolveAdminServerUrl()}/api/ai/talk`; }
 
+const INITIAL_GREETING = 'আসসালামু আলাইকুম ওয়া রাহমাতুল্লাহি ওয়া বারাকাতুহু। কীভাবে আপনাকে সাহায্য করতে পারি?';
+
 /** A quiet eight-point Islamic star used as the assistant's mark. */
 function SacredMark({ className = '' }: { className?: string }) {
   return (
@@ -57,6 +59,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   const interimTranscriptRef = useRef('');
   const requestRef = useRef<AbortController | null>(null);
   const autoListenRef = useRef(false);
+  const greetingStartedRef = useRef(false);
   const busyRef = useRef(false);
   const speakingRef = useRef(false);
   const speechTokenRef = useRef(0);
@@ -65,6 +68,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   replyLanguageRef.current = replyLanguage;
   messagesRef.current = messages;
   const startRecognitionRef = useRef<() => void>(() => {});
+  const startGreetingRef = useRef<() => void>(() => {});
   const askAssistantRef = useRef<(content: string) => void>(() => {});
   const submitTranscriptRef = useRef<() => void>(() => {});
   const nextMessageId = useRef(1);
@@ -72,12 +76,18 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   const endOfSpeechDelay = 3000;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      greetingStartedRef.current = false;
+      return;
+    }
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeRef.current(); };
     window.addEventListener('keydown', onKeyDown);
-    window.setTimeout(() => micRef.current?.focus(), 0);
+    window.setTimeout(() => {
+      micRef.current?.focus();
+      startGreetingRef.current();
+    }, 0);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
@@ -337,6 +347,24 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     utterance.onerror = finishSpeaking;
     setSpeakingId(message.id);
     window.speechSynthesis.speak(utterance);
+  };
+
+  startGreetingRef.current = () => {
+    if (!open || greetingStartedRef.current) return;
+    greetingStartedRef.current = true;
+    const greeting: ChatMessage = { role: 'assistant', content: INITIAL_GREETING, id: nextMessageId.current++ };
+    messagesRef.current = [greeting];
+    setMessages(messagesRef.current);
+    setVoiceError('');
+    autoListenRef.current = true;
+    setContinuousMode(true);
+
+    if ('speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined') {
+      speak(greeting);
+    } else {
+      setVoiceError(t.voiceUnsupported);
+      startRecognitionRef.current();
+    }
   };
 
   const clearConversation = () => {
