@@ -10,7 +10,6 @@ import {
   type AiDraft,
 } from '../utils/aiDraft';
 import { getPushStatus, sendPushToAllDevices, type PushStatus } from '../utils/pushNotifications';
-import { getNotificationPermission, requestNotificationPermission } from '../utils/notifications';
 import {
   AI_PROVIDER_PRESETS,
   AI_PROVIDER_STORAGE_KEY,
@@ -162,8 +161,6 @@ export const AdminNotificationsPage: React.FC = () => {
   const send = async () => {
     setBusy('send'); setNotice(null);
     try {
-      const permission = getNotificationPermission() === 'default' ? await requestNotificationPermission() : getNotificationPermission();
-      if (permission !== 'granted') throw new Error(permission === 'unsupported' ? 'Notifications need a supported browser and secure HTTPS connection.' : 'Notification permission was not granted.');
       const result = await sendPushToAllDevices(title.trim(), body.trim());
       setNotice({
         error: result.failed > 0 || result.total === 0,
@@ -172,7 +169,7 @@ export const AdminNotificationsPage: React.FC = () => {
           : `Broadcast sent: ${result.sent} of ${result.total} registered device(s) accepted it${result.failed ? `; ${result.failed} failed` : ''}${result.removed ? `; removed ${result.removed} expired subscription(s)` : ''}.`,
       });
       await refreshPushStatus();
-    } catch (error) { setNotice({ error: true, text: error instanceof Error ? error.message : 'Could not show notification.' }); }
+    } catch (error) { setNotice({ error: true, text: error instanceof Error ? error.message : 'Could not send the broadcast.' }); }
     finally { setBusy(null); }
   };
 
@@ -233,7 +230,7 @@ export const AdminNotificationsPage: React.FC = () => {
       <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs text-[var(--text-secondary)]">
-            {pushChecking ? 'Checking registered devices…' : pushStatus
+            {pushChecking ? 'Checking registered devices…' : pushStatus && typeof pushStatus.subscribers === 'number'
               ? `${pushStatus.subscribers} device(s) registered for broadcasts.`
               : 'Could not read the registered device count.'}
           </p>
@@ -242,20 +239,25 @@ export const AdminNotificationsPage: React.FC = () => {
             Refresh
           </Button>
         </div>
-        {pushStatus && (!pushStatus.vapidKeysStable || !pushStatus.persistentStore) && (
-          <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-            {!pushStatus.vapidKeysStable && 'VAPID keys are temporary and subscriptions will stop working after a server restart. Set stable VAPID keys.'}{' '}
-            {!pushStatus.persistentStore && 'Device registrations are only in memory and will be lost when the server restarts. Configure PUSH_STORE_PATH on persistent storage.'}
+        {pushStatus && (!pushStatus.vapidConfigured || !pushStatus.persistentStore) && (
+          <p role="status" className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]">
+            {!pushStatus.vapidConfigured && (pushStatus.vapidReason || 'Set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY, and VAPID_SUBJECT in the server environment.')}{' '}
+            {!pushStatus.persistentStore && (pushStatus.storeReason || 'Configure DATABASE_URL with the Neon PostgreSQL connection string; device subscriptions are not being stored durably.')}
+          </p>
+        )}
+        {pushStatus && pushStatus.vapidConfigured && pushStatus.persistentStore && (
+          <p role="status" className="text-xs text-[var(--text-secondary)]">
+            Stable VAPID configuration and PostgreSQL persistence are active. Registered device subscriptions survive service restarts.
           </p>
         )}
         <label className="block space-y-1.5 text-xs font-medium">Notification title<Input maxLength={DRAFT_TITLE_LIMIT} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
         <label className="block space-y-1.5 text-xs font-medium">Message<Textarea rows={3} maxLength={DRAFT_BODY_LIMIT} value={body} onChange={(e) => setBody(e.target.value)} /></label>
-        <Button disabled={busy !== null || !title.trim() || !body.trim()} onClick={() => void send()}>{busy === 'send' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <><Bell className="h-4 w-4" /><Send className="h-4 w-4" /></>}Broadcast to all devices</Button>
+        <Button disabled={busy !== null || !pushStatus?.enabled || !title.trim() || !body.trim()} onClick={() => void send()}>{busy === 'send' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <><Bell className="h-4 w-4" /><Send className="h-4 w-4" /></>}Broadcast to all devices</Button>
       </div>
     </Card>
     {notice && <p role="status" className={`rounded-xl border p-3 text-sm ${notice.error ? 'border-red-500/30 text-red-700 dark:text-red-300' : 'border-[var(--accent-primary)]/25 text-[var(--accent-primary)]'}`}>{notice.text}</p>}
     <p className="text-xs leading-relaxed text-[var(--text-muted)]">{proxy?.available
       ? `Requests go through the AI proxy (${config.proxyUrl.trim() || BUILD_TIME_PROXY_URL || 'this app'})${proxy.serverKeyConfigured ? ' with a server key configured' : ''}, so the provider's browser (CORS) policy does not matter.`
-      : 'The AI proxy is not reachable, so requests go directly from your browser and the provider must allow browser (CORS) requests. Google Gemini and OpenRouter do; OpenAI and most self-hosted OpenAI-compatible APIs do not, so they need the bundled server or a proxy URL above (or VITE_AI_PROXY_URL at build time).'} Enter the base URL only (for example, https://api.openai.com/v1); /chat/completions is added automatically. Device notifications need permission and typically HTTPS; this tool cannot notify other users or deliver while the app is closed.</p>
+      : 'The AI proxy is not reachable, so requests go directly from your browser and the provider must allow browser (CORS) requests. Google Gemini and OpenRouter do; OpenAI and most self-hosted OpenAI-compatible APIs do not, so they need the bundled server or a proxy URL above (or VITE_AI_PROXY_URL at build time).'} Enter the base URL only (for example, https://api.openai.com/v1); /chat/completions is added automatically. Device notifications need permission and typically HTTPS; scheduled reminders run in-app, while Web Push broadcasts can reach registered devices when the app is closed.</p>
   </div>;
 };

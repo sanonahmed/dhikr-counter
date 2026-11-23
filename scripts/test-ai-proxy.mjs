@@ -1,5 +1,11 @@
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { PGlite } from '@electric-sql/pglite';
+import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
+
+const require = createRequire(import.meta.url);
+const webpush = require('web-push');
 
 const providerPort = 5099;
 const appPort = 8790;
@@ -23,12 +29,41 @@ const provider = http.createServer((req, res) => {
 
 await new Promise((resolve) => provider.listen(providerPort, resolve));
 
+// The push runtime uses the real pg adapter, so the test needs a PostgreSQL
+// server. PGlite speaks the PostgreSQL wire protocol through this socket and
+// keeps everything in memory; the server applies migrations/001 on first use.
+const testDatabase = await PGlite.create();
+const databaseServer = new PGLiteSocketServer({
+  db: testDatabase,
+  port: 0,
+  host: '127.0.0.1',
+  maxConnections: 10,
+});
+try {
+  await databaseServer.start();
+} catch (error) {
+  await testDatabase.close().catch(() => {});
+  throw error;
+}
+const databaseAddress = databaseServer.server?.address?.();
+if (!databaseAddress?.port) {
+  await databaseServer.stop().catch(() => {});
+  await testDatabase.close().catch(() => {});
+  throw new Error('The test PostgreSQL server did not report a port.');
+}
+const databaseUrl = `postgresql://postgres:postgres@127.0.0.1:${databaseAddress.port}/postgres`;
+const vapidKeys = webpush.generateVAPIDKeys();
+
 const child = spawn(process.execPath, ['server.js'], {
   cwd: process.cwd(),
   env: {
     ...process.env,
     PORT: String(appPort),
     NODE_ENV: 'development',
+    DATABASE_URL: databaseUrl,
+    VAPID_PUBLIC_KEY: vapidKeys.publicKey,
+    VAPID_PRIVATE_KEY: vapidKeys.privateKey,
+    VAPID_SUBJECT: 'mailto:test@example.com',
     AI_API_KEY: 'test-key',
     AI_BASE_URL: `http://127.0.0.1:${providerPort}/v1`,
     AI_MODEL: 'mock-model',
@@ -124,7 +159,11 @@ try {
   check('admin session is recognised', sessionInfo.enabled === true && sessionInfo.authenticated === true, JSON.stringify(sessionInfo));
 
   const pushStatus = await fetch(`${base}/api/admin/push`, { headers: adminHeaders() }).then((r) => r.json());
-  check('push broadcast starts with no registered devices', pushStatus.subscribers === 0, JSON.stringify(pushStatus));
+  check(
+    'push status reports a connected PostgreSQL store',
+    pushStatus.subscribers === 0 && pushStatus.enabled === true && pushStatus.store?.kind === 'postgres' && pushStatus.store?.connected === true,
+    JSON.stringify(pushStatus)
+  );
 
   const fakeSubscription = {
     endpoint: 'https://push.example.com/send/abc123',
@@ -137,8 +176,24 @@ try {
   });
   check('a device can register a push subscription', subscribe.status === 200, `${subscribe.status}`);
 
+  const resubscribe = await fetch(`${base}/api/push/subscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription: fakeSubscription }),
+  });
   const pushStatusAfter = await fetch(`${base}/api/admin/push`, { headers: adminHeaders() }).then((r) => r.json());
-  check('registered devices are counted for the admin', pushStatusAfter.subscribers === 1, JSON.stringify(pushStatusAfter));
+  check(
+    're-registering the same endpoint is idempotent',
+    resubscribe.status === 200 && pushStatusAfter.subscribers === 1,
+    `${resubscribe.status} ${JSON.stringify(pushStatusAfter)}`
+  );
+
+  const invalidKeysSubscription = await fetch(`${base}/api/push/subscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ subscription: { ...fakeSubscription, endpoint: 'https://push.example.com/send/invalid', keys: { p256dh: 'abc', auth: 'A'.repeat(22) } } }),
+  });
+  check('subscriptions with malformed keys are rejected', invalidKeysSubscription.status === 400, `${invalidKeysSubscription.status}`);
 
   const insecureSubscription = await fetch(`${base}/api/push/subscribe`, {
     method: 'POST',
@@ -161,13 +216,50 @@ try {
   });
   check('broadcasting requires a title and message', emptyBroadcast.status === 400, `${emptyBroadcast.status}`);
 
-  const unsubscribe = await fetch(`${base}/api/push/unsubscribe`, {
+  const endpointOnlyUnsubscribe = await fetch(`${base}/api/push/unsubscribe`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ endpoint: fakeSubscription.endpoint }),
   });
+  check('unsubscribe requires proof of key ownership', endpointOnlyUnsubscribe.status === 400, `${endpointOnlyUnsubscribe.status}`);
+
+  const wrongKeysUnsubscribe = await fetch(`${base}/api/push/unsubscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint: fakeSubscription.endpoint, keys: { p256dh: 'B'.repeat(86) + 'C', auth: 'A'.repeat(22) } }),
+  });
+  const wrongKeysData = await wrongKeysUnsubscribe.json();
+  const pushStatusAfterWrongKeys = await fetch(`${base}/api/admin/push`, { headers: adminHeaders() }).then((r) => r.json());
+  check(
+    'unsubscribe with wrong keys leaves the device registered',
+    wrongKeysUnsubscribe.status === 200 && wrongKeysData.removed === false && pushStatusAfterWrongKeys.subscribers === 1,
+    `${wrongKeysUnsubscribe.status} ${JSON.stringify(wrongKeysData)}`
+  );
+
+  const unsubscribe = await fetch(`${base}/api/push/unsubscribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ endpoint: fakeSubscription.endpoint, keys: fakeSubscription.keys }),
+  });
+  const unsubscribeData = await unsubscribe.json();
   const pushStatusAfterRemoval = await fetch(`${base}/api/admin/push`, { headers: adminHeaders() }).then((r) => r.json());
-  check('a device can unregister from broadcasts', unsubscribe.status === 200 && pushStatusAfterRemoval.subscribers === 0, JSON.stringify(pushStatusAfterRemoval));
+  check(
+    'a device can unregister with its subscription keys',
+    unsubscribe.status === 200 && unsubscribeData.removed === true && pushStatusAfterRemoval.subscribers === 0,
+    `${unsubscribe.status} ${JSON.stringify(pushStatusAfterRemoval)}`
+  );
+
+  const noDevicesBroadcast = await fetch(`${base}/api/admin/push`, {
+    method: 'POST',
+    headers: adminHeaders(),
+    body: JSON.stringify({ title: 'Test', body: 'No devices yet' }),
+  });
+  const noDevicesData = await noDevicesBroadcast.json();
+  check(
+    'broadcasting with no registered devices succeeds with zero totals',
+    noDevicesBroadcast.status === 200 && noDevicesData.total === 0 && noDevicesData.sent === 0,
+    `${noDevicesBroadcast.status} ${JSON.stringify(noDevicesData)}`
+  );
 
   const corsPreflight = await fetch(`${base}/api/ai/chat`, {
     method: 'OPTIONS',
@@ -304,6 +396,8 @@ try {
 } finally {
   child.kill();
   provider.close();
+  await databaseServer.stop().catch(() => {});
+  await testDatabase.close().catch(() => {});
 }
 
 const failed = results.filter((r) => !r.ok);

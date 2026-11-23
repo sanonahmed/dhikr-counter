@@ -12,8 +12,12 @@ services:
       # /api/ai/chat refuses all requests, so the AI key cannot be spent.
       - key: ADMIN_PASSCODE
         sync: false
+      # Required PostgreSQL connection (Neon recommended). The server applies
+      # migrations/001_push_subscriptions.sql automatically when it connects.
+      - key: DATABASE_URL
+        sync: false
       # Web Push credentials must be generated once and kept stable across deploys.
-      # Generate with: node -e "console.log(require('web-push').generateVAPIDKeys())"
+      # Generate with: npx web-push generate-vapid-keys
       - key: VAPID_PUBLIC_KEY
         sync: false
       - key: VAPID_PRIVATE_KEY

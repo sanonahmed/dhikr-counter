@@ -15,6 +15,7 @@ Add the passcode to the environment of the **Node service** (`server.js`):
 | --- | --- | --- |
 | `ADMIN_PASSCODE` | yes | The passcode that unlocks the panel. Unset ⇒ the panel is disabled. |
 | `ADMIN_SESSION_HOURS` | no | How long a login lasts. Default `12`, maximum `168` (one week). |
+| `DATABASE_URL` | yes for push | PostgreSQL connection string (Neon recommended); the service runs `migrations/001_push_subscriptions.sql` automatically when it connects. |
 | `AI_API_KEY` / `GEMINI_API_KEY` | no | Provider key used by the server-side AI relay. |
 | `AI_BASE_URL`, `AI_MODEL` | no | OpenAI-compatible endpoint and model used by that relay. |
 | `VITE_AI_PROXY_URL` | static hosting | Build-time URL of the Node service, so the panel knows where to sign in. |
@@ -97,13 +98,14 @@ Required on the Node service:
 
 | Variable | Purpose |
 | --- | --- |
-| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Authenticate push delivery. Generate once with `node -e "console.log(require('web-push').generateVAPIDKeys())"` and keep them stable. Without them a throwaway pair is generated at boot, so devices must re-register after every restart. |
+| `DATABASE_URL` | PostgreSQL connection string. Required for push; the idempotent migration in `migrations/001_push_subscriptions.sql` is applied automatically on connection. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` | Authenticate push delivery. Generate once with `npx web-push generate-vapid-keys` and keep the pair stable across deploys. |
 | `VAPID_SUBJECT` | `mailto:` or `https:` contact URL, e.g. `mailto:admin@example.com`. |
-| `PUSH_STORE_PATH` | Optional. A JSON file path for registered subscriptions. Set it to a mounted persistent disk (for example `/var/data/push-subscriptions.json`) so devices survive restarts and deploys. Without it the list lives in memory and repopulates as devices reopen the app. |
 
-The studio shows the registered device count and warns when keys are temporary
-or the store is memory-only. Broadcasts need a valid admin session, just like
-the AI relay, and expired subscriptions are removed automatically.
+The studio shows the registered device count and reports whether the stable VAPID
+configuration and PostgreSQL connection are available. Broadcasts need a valid
+admin session, just like the AI relay, and expired subscriptions are removed
+automatically.
 
 ---
 

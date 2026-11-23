@@ -17,6 +17,8 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const webpush = require('web-push');
+import { createPushRuntime } from './server/push/runtime.js';
+import { registerPushRoutes } from './server/push/router.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Load ignored local secrets first; already-exported environment and .env values
@@ -43,8 +45,8 @@ if (process.env.NODE_ENV !== 'production') {
     fs.watch(__dirname, (_event, filename) => {
       if (!filename || !ENV_FILES.includes(String(filename))) return;
       loadEnvFiles({ override: true });
-      refreshPushCredentials();
-      console.log(`[ai-proxy] reloaded ${filename} (AI_ALLOWED_HOSTS / AI_PROXY_ORIGINS / VAPID_* updated).`);
+      const push = pushRuntime.reload();
+      console.log(`[ai-proxy] reloaded ${filename} (AI_ALLOWED_HOSTS / AI_PROXY_ORIGINS / push config updated: ${push.storeKind}).`);
     });
   } catch {
     // A missing directory or an unsupported watcher should never break startup.
@@ -260,131 +262,18 @@ function buildChatEndpoint(rawBaseUrl) {
 }
 
 /* -------------------------------------------------------------------------
- * Web Push broadcast
+ * Web Push runtime.
  *
- * Every device that grants notification permission registers its Push API
- * subscription here. The admin panel then pushes one message to all of them,
- * including devices where the app is closed. VAPID keys must be stable across
- * restarts or existing subscriptions stop working, so set
- * VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY in the service environment. Without
- * them a throwaway pair is generated at boot and logged.
+ * VAPID keys are environment-only and never generated at boot. PostgreSQL is
+ * the only subscription store; there is no process memory or filesystem
+ * fallback. Production requires DATABASE_URL + all VAPID settings.
  * ---------------------------------------------------------------------- */
-
-const PUSH_MAX_SUBSCRIPTIONS = 20_000;
-const PUSH_BATCH_SIZE = 50;
-const PUSH_MAX_TITLE = 120;
-const PUSH_MAX_BODY = 400;
-
-function createPushCredentials() {
-  const publicKey = (process.env.VAPID_PUBLIC_KEY || '').trim();
-  const privateKey = (process.env.VAPID_PRIVATE_KEY || '').trim();
-  const subject = (process.env.VAPID_SUBJECT || 'mailto:admin@example.com').trim();
-  if (publicKey && privateKey) {
-    return { publicKey, privateKey, subject, source: 'env' };
-  }
-  const generated = webpush.generateVAPIDKeys();
-  return { publicKey: generated.publicKey, privateKey: generated.privateKey, subject, source: 'generated' };
-}
-
-let pushCredentials = createPushCredentials();
-try {
-  webpush.setVapidDetails(pushCredentials.subject, pushCredentials.publicKey, pushCredentials.privateKey);
-} catch (error) {
-  console.error(`[push] VAPID setup failed: ${error instanceof Error ? error.message : String(error)}`);
-}
-
-/**
- * Picks up VAPID_* added to .env.local while the dev server is running. Keeps
- * the generated pair when the variables are still absent, so editing an
- * unrelated line does not rotate the keys.
- */
-function refreshPushCredentials() {
-  const publicKey = (process.env.VAPID_PUBLIC_KEY || '').trim();
-  const privateKey = (process.env.VAPID_PRIVATE_KEY || '').trim();
-  if (!publicKey || !privateKey) return;
-  const subject = (process.env.VAPID_SUBJECT || 'mailto:admin@example.com').trim();
-  if (publicKey === pushCredentials.publicKey && privateKey === pushCredentials.privateKey) return;
-  pushCredentials = { publicKey, privateKey, subject, source: 'env' };
-  try {
-    webpush.setVapidDetails(subject, publicKey, privateKey);
-    console.log('[push] VAPID keys reloaded from the environment.');
-  } catch (error) {
-    console.error(`[push] VAPID reload failed: ${error instanceof Error ? error.message : String(error)}`);
-  }
-}
-
-const pushStorePath = (process.env.PUSH_STORE_PATH || '').trim();
-/** endpoint -> { subscription, addedAt } */
-const pushSubscriptions = new Map();
-let pushSaveTimer = null;
-
-function normalizePushSubscription(input) {
-  const raw = input && typeof input === 'object' ? input : {};
-  const endpoint = typeof raw.endpoint === 'string' ? raw.endpoint.trim() : '';
-  const p256dh = typeof raw.keys?.p256dh === 'string' ? raw.keys.p256dh.trim() : '';
-  const auth = typeof raw.keys?.auth === 'string' ? raw.keys.auth.trim() : '';
-  if (!endpoint || !p256dh || !auth) return null;
-  if (endpoint.length > 2_048 || p256dh.length > 512 || auth.length > 256) return null;
-
-  let url;
-  try {
-    url = new URL(endpoint);
-  } catch {
-    return null;
-  }
-  const isLocal = url.hostname === 'localhost' || url.hostname === '127.0.0.1';
-  if (url.protocol !== 'https:' && !(isLocal && process.env.NODE_ENV !== 'production')) {
-    return null;
-  }
-  if (!isLocal && (BLOCKED_HOSTNAMES.has(url.hostname.toLowerCase()) || isPrivateIpv4(url.hostname))) {
-    return null;
-  }
-  return {
-    endpoint,
-    keys: { p256dh, auth },
-    expirationTime: typeof raw.expirationTime === 'number' ? raw.expirationTime : null,
-  };
-}
-
-/** Restores subscriptions from PUSH_STORE_PATH when a persistent disk is mounted. */
-function loadPushSubscriptions() {
-  if (!pushStorePath) return;
-  try {
-    const stored = JSON.parse(fs.readFileSync(pushStorePath, 'utf8'));
-    for (const entry of Array.isArray(stored) ? stored : []) {
-      const subscription = normalizePushSubscription(entry?.subscription ?? entry);
-      if (subscription) {
-        pushSubscriptions.set(subscription.endpoint, {
-          subscription,
-          addedAt: Number(entry?.addedAt) || Date.now(),
-        });
-      }
-    }
-    console.log(`[push] restored ${pushSubscriptions.size} subscription(s) from ${pushStorePath}`);
-  } catch (error) {
-    if (error?.code !== 'ENOENT') {
-      console.warn(`[push] could not read ${pushStorePath}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-}
-
-/** Debounced, best-effort persistence; delivery keeps working if the write fails. */
-function persistPushSubscriptions() {
-  if (!pushStorePath) return;
-  if (pushSaveTimer) clearTimeout(pushSaveTimer);
-  pushSaveTimer = setTimeout(() => {
-    const payload = JSON.stringify([...pushSubscriptions.values()], null, 2);
-    fs.promises
-      .mkdir(path.dirname(pushStorePath), { recursive: true })
-      .then(() => fs.promises.writeFile(pushStorePath, payload, { mode: 0o600 }))
-      .catch((error) => {
-        console.warn(`[push] could not save ${pushStorePath}: ${error instanceof Error ? error.message : String(error)}`);
-      });
-  }, 500);
-  pushSaveTimer.unref?.();
-}
-
-loadPushSubscriptions();
+const pushRuntime = createPushRuntime({
+  webpush,
+  env: process.env,
+  required: process.env.NODE_ENV === 'production' || process.env.RENDER === 'true',
+});
+void pushRuntime.prepare();
 
 function upstreamErrorMessage(status, payload) {
   const message = payload?.error?.message || payload?.message;
@@ -530,113 +419,9 @@ app.post('/api/admin/logout', (req, res) => {
   res.json({ ok: true });
 });
 
-/**
- * Public Push API configuration. Every device needs the VAPID public key before
- * it can subscribe, and every device registers itself without an admin login.
- */
-app.get('/api/push/config', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store');
-  res.json({ enabled: Boolean(pushCredentials.publicKey), publicKey: pushCredentials.publicKey });
-});
-
-app.post('/api/push/subscribe', (req, res) => {
-  const subscription = normalizePushSubscription(req.body?.subscription ?? req.body);
-  if (!subscription) {
-    res.status(400).json({ error: 'A valid push subscription is required.' });
-    return;
-  }
-  if (!pushSubscriptions.has(subscription.endpoint) && pushSubscriptions.size >= PUSH_MAX_SUBSCRIPTIONS) {
-    res.status(503).json({ error: 'This server has reached its device limit.' });
-    return;
-  }
-  pushSubscriptions.set(subscription.endpoint, {
-    subscription,
-    addedAt: Date.now(),
-    userAgent: String(req.headers['user-agent'] || '').slice(0, 200),
-  });
-  persistPushSubscriptions();
-  res.json({ ok: true });
-});
-
-app.post('/api/push/unsubscribe', (req, res) => {
-  const endpoint = typeof req.body?.endpoint === 'string' ? req.body.endpoint.trim() : '';
-  if (!endpoint) {
-    res.status(400).json({ error: 'A push endpoint is required.' });
-    return;
-  }
-  const removed = pushSubscriptions.delete(endpoint);
-  if (removed) persistPushSubscriptions();
-  res.json({ ok: true, removed });
-});
-
-/** Admin-only: how many devices would receive a broadcast. */
-app.get('/api/admin/push', requireAdmin, (_req, res) => {
-  res.json({
-    subscribers: pushSubscriptions.size,
-    vapidKeysStable: pushCredentials.source === 'env',
-    persistentStore: Boolean(pushStorePath),
-  });
-});
-
-/**
- * Admin-only broadcast. Sends one notification to every registered device and
- * prunes subscriptions the push service reports as gone (404/410) or bound to a
- * different VAPID key (401/403).
- */
-app.post('/api/admin/push', requireAdmin, async (req, res) => {
-  const title = typeof req.body?.title === 'string' ? req.body.title.trim() : '';
-  const body = typeof req.body?.body === 'string' ? req.body.body.trim() : '';
-  if (!title || !body) {
-    res.status(400).json({ error: 'A notification title and message are required.' });
-    return;
-  }
-  if (title.length > PUSH_MAX_TITLE || body.length > PUSH_MAX_BODY) {
-    res.status(400).json({
-      error: `Keep the title under ${PUSH_MAX_TITLE} and the message under ${PUSH_MAX_BODY} characters.`,
-    });
-    return;
-  }
-
-  const entries = [...pushSubscriptions.entries()];
-  if (entries.length === 0) {
-    res.json({ ok: true, total: 0, sent: 0, failed: 0, removed: 0 });
-    return;
-  }
-
-  const payload = JSON.stringify({ title, body, url: '/', tag: `admin-broadcast-${Date.now()}` });
-  let sent = 0;
-  let failed = 0;
-  let removed = 0;
-
-  for (let index = 0; index < entries.length; index += PUSH_BATCH_SIZE) {
-    const batch = entries.slice(index, index + PUSH_BATCH_SIZE);
-    await Promise.all(
-      batch.map(async ([endpoint, entry]) => {
-        try {
-          await webpush.sendNotification(entry.subscription, payload, {
-            TTL: 3_600,
-            urgency: 'high',
-            timeout: 10_000,
-          });
-          sent += 1;
-        } catch (error) {
-          failed += 1;
-          const status = Number(error?.statusCode) || 0;
-          if (status === 404 || status === 410 || status === 401 || status === 403) {
-            if (pushSubscriptions.delete(endpoint)) removed += 1;
-          } else {
-            console.warn(
-              `[push] delivery failed (${status || 'network'}): ${error instanceof Error ? error.message : String(error)}`
-            );
-          }
-        }
-      })
-    );
-  }
-
-  if (removed > 0) persistPushSubscriptions();
-  res.json({ ok: true, total: entries.length, sent, failed, removed });
-});
+// Web Push HTTP API: /api/push/* and /api/admin/push. Validation, rate limits,
+// PostgreSQL persistence, and expiry pruning live in server/push/.
+registerPushRoutes(app, { runtime: pushRuntime, requireAdmin });
 
 // The AI relay is private: the server-side key must never be reachable from a
 // public page, so a valid admin session is required before any provider call.
@@ -811,11 +596,11 @@ const server = app.listen(PORT, () => {
   console.log(
     `Admin panel: ${adminPasscode() ? `enabled (${Math.round(adminSessionTtlMs() / 3_600_000)}h sessions)` : 'disabled - set ADMIN_PASSCODE to enable it'}`
   );
+  const pushVapid = pushRuntime.vapid;
+  const pushStoreKind = pushRuntime.store.kind;
   console.log(
-    `Web push: ${pushCredentials.source === 'env'
-      ? 'VAPID keys from the environment'
-      : 'ephemeral VAPID keys generated - set VAPID_PUBLIC_KEY/VAPID_PRIVATE_KEY for stable delivery'} ` +
-      `(${pushSubscriptions.size} device(s), ${pushStorePath ? `store: ${pushStorePath}` : 'in-memory store'})`
+    `Web push: VAPID ${pushVapid.enabled ? 'configured (stable)' : `disabled - ${pushVapid.reason}`}; ` +
+      `store ${pushStoreKind === 'postgres' ? 'PostgreSQL (DATABASE_URL)' : 'not configured - set DATABASE_URL'}`
   );
 });
 

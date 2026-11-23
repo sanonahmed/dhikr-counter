@@ -8,10 +8,12 @@
  * admin server address, exactly like the admin API.
  */
 import { getAdminToken, resolveAdminServerUrl } from './adminSession';
-import { getNotificationPermission } from './notifications';
+import { getNotificationPermission, type NotificationPermissionState } from './notifications';
 
 const PUSH_CONFIG_ENDPOINT = '/api/push/config';
+const PUSH_STATUS_ENDPOINT = '/api/push/status';
 const PUSH_SUBSCRIBE_ENDPOINT = '/api/push/subscribe';
+const PUSH_UNSUBSCRIBE_ENDPOINT = '/api/push/unsubscribe';
 const ADMIN_PUSH_ENDPOINT = '/api/admin/push';
 const REQUEST_TIMEOUT_MS = 15_000;
 const SERVICE_WORKER_TIMEOUT_MS = 20_000;
@@ -25,6 +27,8 @@ export type PushRegistrationResult =
   | 'subscribed'
   | 'unsupported'
   | 'permission-denied'
+  /** The server has no stable VAPID keys or no PostgreSQL store configured. */
+  | 'disabled'
   | 'unavailable';
 
 export interface PushBroadcastResult {
@@ -34,13 +38,35 @@ export interface PushBroadcastResult {
   removed: number;
 }
 
-export interface PushStatus {
-  subscribers: number;
-  /** False when the server generated throwaway VAPID keys at boot. */
-  vapidKeysStable: boolean;
-  /** True when subscriptions are saved to a persistent path across restarts. */
-  persistentStore: boolean;
+export interface PushConfig {
+  enabled: boolean;
+  publicKey: string;
+  code: string;
+  reason: string;
 }
+
+export interface PushStatus {
+  /** null when PostgreSQL is unreachable, so 0 is never shown misleadingly. */
+  subscribers: number | null;
+  enabled: boolean;
+  /** True only when both VAPID keys come from the environment and match. */
+  vapidConfigured: boolean;
+  /** True only when the PostgreSQL store is configured and connected. */
+  persistentStore: boolean;
+  storeConnected: boolean;
+  vapidReason: string;
+  storeReason: string;
+}
+
+export interface PushDeviceState {
+  supported: boolean;
+  permission: NotificationPermissionState;
+  subscribed: boolean;
+  endpoint: string | null;
+  serverReady: boolean | null;
+}
+
+
 
 interface JsonResult {
   response: Response;
@@ -119,29 +145,53 @@ function readyRegistration(): Promise<ServiceWorkerRegistration> {
   });
 }
 
-async function fetchPushConfig(): Promise<{ publicKey: string }> {
+export async function fetchPushConfig(): Promise<PushConfig> {
   const { response, data } = await requestJson(PUSH_CONFIG_ENDPOINT, {
     headers: { Accept: 'application/json' },
   });
   const publicKey = typeof data?.publicKey === 'string' ? data.publicKey : '';
-  if (!response.ok || data?.enabled !== true || !publicKey) {
-    throw new Error('Push notifications are not enabled on the app server.');
+  const enabled = response.ok && data?.enabled === true && Boolean(publicKey);
+  return {
+    enabled,
+    publicKey,
+    code: typeof data?.code === 'string' ? data.code : enabled ? 'ok' : 'push_unavailable',
+    reason:
+      typeof data?.reason === 'string' && data.reason
+        ? data.reason
+        : enabled
+          ? ''
+          : 'Push notifications are not enabled on the app server.',
+  };
+}
+
+/** Server readiness without device identity or subscriber counts. */
+async function fetchServerReady(): Promise<boolean | null> {
+  try {
+    const { response, data } = await requestJson(PUSH_STATUS_ENDPOINT, {
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok || !data) return null;
+    return data.enabled === true;
+  } catch {
+    return null;
   }
-  return { publicKey };
 }
 
 /**
  * Registers this device for broadcasts. Safe to call on every launch: an
- * existing subscription is re-posted so the server repopulates its store after
- * a restart. Returns 'permission-denied' (and does nothing) until the user has
- * allowed notifications.
+ * existing subscription is reused and re-posted, so the server's PostgreSQL
+ * row is refreshed after a redeploy or key change. Returns 'disabled' when the
+ * server has no stable keys/database instead of pretending it worked.
  */
 export async function registerPushDevice(): Promise<PushRegistrationResult> {
   if (!pushSupported()) return 'unsupported';
   if (getNotificationPermission() !== 'granted') return 'permission-denied';
 
   try {
-    const [registration, config] = await Promise.all([readyRegistration(), fetchPushConfig()]);
+    const config = await fetchPushConfig();
+    if (!config.enabled) return 'disabled';
+
+    const registration = await readyRegistration();
     let subscription = await registration.pushManager.getSubscription();
 
     if (subscription && !usesServerKey(subscription, config.publicKey)) {
@@ -157,16 +207,70 @@ export async function registerPushDevice(): Promise<PushRegistrationResult> {
       });
     }
 
-    const { response } = await requestJson(PUSH_SUBSCRIBE_ENDPOINT, {
+    const { response, data } = await requestJson(PUSH_SUBSCRIBE_ENDPOINT, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ subscription: subscription.toJSON() }),
     });
-    return response.ok ? 'subscribed' : 'unavailable';
+    // The server answers only after the PostgreSQL upsert commits, so this
+    // response is the confirmation; no separate lookup is needed.
+    if (!response.ok || data?.registered !== true) return 'unavailable';
+
+    return 'subscribed';
   } catch {
     return 'unavailable';
   }
 }
+
+/** Local state only: permission, and whether this browser holds a subscription. */
+export async function getPushDeviceState(): Promise<PushDeviceState> {
+  const permission = getNotificationPermission();
+  const supported = pushSupported();
+  let subscribed = false;
+  let endpoint: string | null = null;
+
+  if (supported) {
+    try {
+      const registration = await navigator.serviceWorker.getRegistration();
+      const subscription = await registration?.pushManager.getSubscription();
+      subscribed = Boolean(subscription);
+      endpoint = subscription?.endpoint ?? null;
+    } catch {
+      // No registration yet, or the browser blocked access.
+    }
+  }
+
+  return { supported, permission, subscribed, endpoint, serverReady: await fetchServerReady() };
+}
+
+/**
+ * Removes this device from broadcasts. The server requires the subscription's
+ * p256dh/auth keys as proof of ownership, so an endpoint copied from a log
+ * cannot unregister someone else's device. The local subscription is dropped
+ * afterwards either way.
+ */
+export async function unsubscribePushDevice(): Promise<boolean> {
+  if (!pushSupported()) return false;
+
+  try {
+    const registration = await readyRegistration();
+    const subscription = await registration.pushManager.getSubscription();
+    if (!subscription) return true;
+
+    const json = subscription.toJSON();
+    const { response } = await requestJson(PUSH_UNSUBSCRIBE_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ endpoint: subscription.endpoint, keys: json.keys }),
+    });
+
+    if (!response.ok) return false;
+    return await subscription.unsubscribe();
+  } catch {
+    return false;
+  }
+}
+
 
 export async function getPushStatus(): Promise<PushStatus | null> {
   const token = getAdminToken();
@@ -176,10 +280,17 @@ export async function getPushStatus(): Promise<PushStatus | null> {
       headers: { Accept: 'application/json', Authorization: `Bearer ${token}` },
     });
     if (!response.ok || !data) return null;
+    const vapid = (data.vapid ?? {}) as Record<string, unknown>;
+    const store = (data.store ?? {}) as Record<string, unknown>;
+    const subscribers = typeof data.subscribers === 'number' ? data.subscribers : null;
     return {
-      subscribers: Number(data.subscribers) || 0,
-      vapidKeysStable: data.vapidKeysStable === true,
-      persistentStore: data.persistentStore === true,
+      subscribers,
+      enabled: data.enabled === true,
+      vapidConfigured: vapid.configured === true,
+      persistentStore: store.persistent === true && store.connected === true,
+      storeConnected: store.connected === true,
+      vapidReason: typeof vapid.reason === 'string' ? vapid.reason : '',
+      storeReason: typeof store.reason === 'string' ? store.reason : '',
     };
   } catch {
     return null;

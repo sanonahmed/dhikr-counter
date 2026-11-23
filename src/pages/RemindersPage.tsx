@@ -1,12 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { Bell, BellRing, Info, Plus, Trash2 } from 'lucide-react';
+import { Bell, BellRing, Info, LoaderCircle, Plus, Trash2 } from 'lucide-react';
 import type { Language, ReminderItem } from '../types/dhikr';
 import { db, generateId } from '../db/database';
 import { getTranslations } from '../i18n/translations';
 import { Button, Card, ConfirmDialog, EmptyState, Input, Modal, Select, Switch } from '../components/ui/Primitives';
 import { cn } from '../utils/cn';
 import { getNotificationPermission, requestNotificationPermission, showLocalNotification } from '../utils/notifications';
-import { registerPushDevice } from '../utils/pushNotifications';
+import {
+  fetchPushConfig,
+  getPushDeviceState,
+  registerPushDevice,
+  unsubscribePushDevice,
+  type PushDeviceState,
+  type PushRegistrationResult,
+} from '../utils/pushNotifications';
 
 interface RemindersPageProps {
   language: Language;
@@ -50,6 +57,8 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
   const t = getTranslations(language);
   const [permission, setPermission] = useState(() => getNotificationPermission());
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [deviceState, setDeviceState] = useState<PushDeviceState | null>(null);
+  const [pushBusy, setPushBusy] = useState<'register' | 'disable' | 'test' | null>(null);
 
   const [modalOpen, setModalOpen] = useState(false);
   const [presetType, setPresetType] = useState<ReminderItem['presetType']>('morning');
@@ -60,37 +69,84 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
   const [error, setError] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<ReminderItem | null>(null);
 
+  const refreshDeviceState = async () => {
+    const state = await getPushDeviceState();
+    setDeviceState(state);
+    return state;
+  };
+
   useEffect(() => {
-    const refreshPermission = () => setPermission(getNotificationPermission());
-    window.addEventListener('focus', refreshPermission);
-    document.addEventListener('visibilitychange', refreshPermission);
+    const refresh = () => {
+      setPermission(getNotificationPermission());
+      void refreshDeviceState();
+    };
+    refresh();
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refresh);
     return () => {
-      window.removeEventListener('focus', refreshPermission);
-      document.removeEventListener('visibilitychange', refreshPermission);
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refresh);
     };
   }, []);
 
+  const registrationOutcome = async (result: PushRegistrationResult): Promise<string> => {
+    if (result === 'subscribed') return 'This device is registered for admin broadcasts.';
+    if (result === 'disabled') {
+      const config = await fetchPushConfig().catch(() => null);
+      return `Admin broadcasts are not configured on the server${config?.reason ? `: ${config.reason}` : '.'}`;
+    }
+    if (result === 'unsupported') {
+      return 'This browser cannot register for Web Push. Use a supported browser on HTTPS (or localhost).';
+    }
+    if (result === 'permission-denied') {
+      return 'This browser has not granted notification permission, so the device was not registered.';
+    }
+    return 'This device could not register for admin broadcasts. Check the server connection and try again.';
+  };
+
   const handleRequestPermission = async () => {
+    setPushBusy('register');
     try {
       const result = await requestNotificationPermission();
       setPermission(result);
-      const pushResult = result === 'granted' ? await registerPushDevice() : 'permission-denied';
-      setStatusMessage(
-        result === 'granted'
-          ? pushResult === 'subscribed'
-            ? 'Notifications are enabled and this device is registered for admin broadcasts.'
-            : 'Notifications are allowed for local reminders. This device could not register for admin broadcasts.'
-          : result === 'denied'
+      if (result !== 'granted') {
+        setStatusMessage(
+          result === 'denied'
             ? 'Notifications are blocked. Enable them for this site in your browser or device settings.'
             : 'This browser or connection does not support Web Notifications. Use HTTPS (or localhost) in a supported browser.'
-      );
+        );
+        return;
+      }
+      const pushResult = await registerPushDevice();
+      await refreshDeviceState();
+      setStatusMessage(`Notifications are enabled. ${await registrationOutcome(pushResult)}`);
     } catch {
       setPermission(getNotificationPermission());
       setStatusMessage('Could not request notification permission. Check this site’s browser settings and try again.');
+    } finally {
+      setPushBusy(null);
+    }
+  };
+
+  const handleDisableNotifications = async () => {
+    setPushBusy('disable');
+    try {
+      const removed = await unsubscribePushDevice();
+      await refreshDeviceState();
+      setStatusMessage(
+        removed
+          ? 'This device will no longer receive admin broadcasts. Local reminder notifications are unaffected.'
+          : 'This device could not be removed from the server. Check your connection and try again.'
+      );
+    } catch {
+      setStatusMessage('This device could not be removed from the server. Check your connection and try again.');
+    } finally {
+      setPushBusy(null);
     }
   };
 
   const handleTestNotification = async () => {
+    setPushBusy('test');
     try {
       let currentPermission = getNotificationPermission();
       if (currentPermission === 'unsupported') {
@@ -113,14 +169,17 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
         return;
       }
 
-      await registerPushDevice();
+      const pushResult = await registerPushDevice();
+      await refreshDeviceState();
       await showLocalNotification('Dhikr Counter', {
         body: 'Assalamu Alaikum — your local notifications are working.',
         tag: 'dhikr-counter-test',
       });
-      setStatusMessage('Test notification sent. This device is also registered for admin broadcasts.');
+      setStatusMessage(`Test notification sent. ${await registrationOutcome(pushResult)}`);
     } catch {
       setStatusMessage('The browser could not display the notification. Check device/site notification settings and try again.');
+    } finally {
+      setPushBusy(null);
     }
   };
 
@@ -199,14 +258,36 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             {permission !== 'granted' && (
-              <Button size="sm" variant="primary" onClick={() => void handleRequestPermission()}>
-                <BellRing className="w-4 h-4" />
+              <Button size="sm" variant="primary" disabled={pushBusy !== null} onClick={() => void handleRequestPermission()}>
+                {pushBusy === 'register' ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <BellRing className="w-4 h-4" />}
                 {t.reminders.enableNotifications}
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={handleTestNotification}>
+            <Button size="sm" variant="outline" disabled={pushBusy !== null} onClick={() => void handleTestNotification()}>
+              {pushBusy === 'test' ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
               {t.reminders.testNotification}
             </Button>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-[var(--border-subtle)] p-3.5 space-y-3">
+          <div className="text-xs text-[var(--text-secondary)]">
+            <p>Web Push device: <strong className="capitalize text-[var(--text-primary)]">{deviceState?.subscribed ? 'registered' : deviceState?.supported ? 'not registered' : 'unsupported'}</strong></p>
+            <p className="mt-1">Push service: <strong className="capitalize text-[var(--text-primary)]">{deviceState?.serverReady === null ? 'unavailable' : deviceState?.serverReady ? 'ready' : 'not configured'}</strong></p>
+            {deviceState?.permission === 'denied' && <p className="mt-1">Permission is blocked in browser settings; change it there before enabling push.</p>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {deviceState?.subscribed ? (
+              <Button size="sm" variant="outline" disabled={pushBusy !== null} onClick={() => void handleDisableNotifications()}>
+                {pushBusy === 'disable' ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <Bell className="w-4 h-4" />}
+                Disable Web Push on this device
+              </Button>
+            ) : permission === 'granted' && deviceState?.supported ? (
+              <Button size="sm" variant="primary" disabled={pushBusy !== null} onClick={() => void handleRequestPermission()}>
+                {pushBusy === 'register' ? <LoaderCircle className="w-4 h-4 animate-spin" /> : <BellRing className="w-4 h-4" />}
+                Register this device for Web Push
+              </Button>
+            ) : null}
           </div>
         </div>
 
