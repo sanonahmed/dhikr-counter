@@ -10,11 +10,13 @@ const webpush = require('web-push');
 const providerPort = 5099;
 const appPort = 8790;
 
+let lastProviderBody = null;
 const provider = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (chunk) => { raw += chunk; });
   req.on('end', () => {
     const body = raw ? JSON.parse(raw) : {};
+    lastProviderBody = body;
     res.setHeader('Content-Type', 'application/json');
     if (req.headers.authorization !== 'Bearer test-key') {
       res.statusCode = 401;
@@ -301,6 +303,32 @@ try {
   }).then((r) => r.json());
   check('proxy completion', proxied.content === 'Mock reply for model mock-model', JSON.stringify(proxied));
 
+  const publicTalk = await fetch(`${base}/api/ai/talk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language: 'bn', messages: [
+      { role: 'user', content: 'নামাজের পর কী পড়ব?' },
+      { role: 'assistant', content: 'আপনি নির্ভরযোগ্য যিকির দিয়ে শুরু করতে পারেন।' },
+      { role: 'user', content: 'বাংলায় সহজ করে বলুন।' },
+    ] }),
+  });
+  const publicTalkData = await publicTalk.json();
+  check(
+    'public AI Talk works without an admin session and uses configured provider',
+    publicTalk.status === 200 && publicTalkData.content === 'Mock reply for model mock-model' &&
+      lastProviderBody?.messages?.length === 4 && lastProviderBody?.messages?.[0]?.role === 'system' &&
+      /Bangla/.test(lastProviderBody?.messages?.[0]?.content || '') &&
+      lastProviderBody?.messages?.[3]?.content === 'বাংলায় সহজ করে বলুন।',
+    `${publicTalk.status} ${JSON.stringify(publicTalkData)}`
+  );
+
+  const tooManyTalkMessages = await fetch(`${base}/api/ai/talk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: Array.from({ length: 13 }, () => ({ role: 'user', content: 'Hi' })) }),
+  });
+  check('AI Talk rejects oversized conversation history', tooManyTalkMessages.status === 400, `${tooManyTalkMessages.status}`);
+
   const badKey = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
     headers: adminHeaders(),
@@ -349,6 +377,22 @@ try {
   check('empty prompt rejected', emptyPrompt.status === 400, `${emptyPrompt.status} ${(await emptyPrompt.json()).error}`);
 
   // Locking out is per client IP, so it runs after every authenticated check.
+  let talkLimited;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    talkLimited = await fetch(`${base}/api/ai/talk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ role: 'user', content: `Rate limit check ${attempt}` }] }),
+    });
+    if (talkLimited.status === 429) break;
+  }
+  const talkLimitData = await talkLimited.json();
+  check(
+    'public AI Talk requests are rate-limited per IP',
+    talkLimited.status === 429 && talkLimitData.code === 'rate_limited' && talkLimited.headers.has('retry-after'),
+    `${talkLimited.status} ${JSON.stringify(talkLimitData)}`
+  );
+
   const logout = await fetch(`${base}/api/admin/logout`, {
     method: 'POST',
     headers: adminHeaders(),

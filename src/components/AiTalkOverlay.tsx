@@ -1,0 +1,329 @@
+import React, { useEffect, useRef, useState } from 'react';
+import { Bot, LoaderCircle, Mic, MicOff, Plus, Send, Volume2, VolumeX, X } from 'lucide-react';
+import type { Language } from '../types/dhikr';
+import { getTranslations } from '../i18n/translations';
+import { resolveAdminServerUrl } from '../utils/adminSession';
+import { cn } from '../utils/cn';
+
+interface AiTalkOverlayProps { open: boolean; onClose: () => void; language: Language; }
+interface ChatMessage { role: 'user' | 'assistant'; content: string; id: number; }
+interface SpeechRecognitionResultLike { transcript: string; }
+interface SpeechRecognitionEventLike { results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>; }
+interface SpeechRecognitionErrorLike { error: string; }
+interface SpeechRecognitionLike {
+  lang: string; interimResults: boolean; maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+  onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
+  onend: (() => void) | null; start: () => void; stop: () => void;
+}
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+type SpeechRecognitionWindow = Window & { SpeechRecognition?: SpeechRecognitionConstructor; webkitSpeechRecognition?: SpeechRecognitionConstructor; };
+
+function chatEndpoint(): string { return `${resolveAdminServerUrl()}/api/ai/talk`; }
+
+export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, language }) => {
+  const t = getTranslations(language).aiTalk;
+  const [replyLanguage, setReplyLanguage] = useState<Language>('bn');
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [voiceError, setVoiceError] = useState('');
+  const [requestError, setRequestError] = useState('');
+  const [speakingId, setSpeakingId] = useState<number | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const nextMessageId = useRef(1);
+
+  useEffect(() => {
+    if (!open) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeRef.current(); };
+    window.addEventListener('keydown', onKeyDown);
+    window.setTimeout(() => inputRef.current?.focus(), 0);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', onKeyDown);
+      recognitionRef.current?.stop();
+      recognitionRef.current = null;
+      window.speechSynthesis?.cancel();
+      setListening(false);
+      setSpeakingId(null);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [messages, busy, listening]);
+
+  if (!open) return null;
+
+  const stopListening = () => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setListening(false);
+  };
+
+  const startListening = () => {
+    const speechWindow = window as SpeechRecognitionWindow;
+    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    setVoiceError('');
+    if (!Recognition) { setVoiceError(t.unavailable); return; }
+    try {
+      const recognition = new Recognition();
+      recognition.lang = replyLanguage === 'bn' ? 'bn-BD' : 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+      recognition.onresult = (event) => {
+        const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
+        if (transcript) {
+          void sendMessage(transcript, true);
+        }
+      };
+      recognition.onerror = (event) => {
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') setVoiceError(t.micDenied);
+        else if (event.error === 'no-speech') setVoiceError(t.noSpeech);
+        else if (event.error === 'network') setVoiceError(t.networkError);
+        else setVoiceError(t.voiceError);
+      };
+      recognition.onend = () => { recognitionRef.current = null; setListening(false); };
+      recognitionRef.current = recognition;
+      setListening(true);
+      recognition.start();
+    } catch {
+      recognitionRef.current = null;
+      setListening(false);
+      setVoiceError(t.voiceError);
+    }
+  };
+
+  const sendMessage = async (content = draft, fromVoice = false) => {
+    const text = content.trim();
+    if (!text || busy || text.length > 1200) return;
+    stopListening();
+    window.speechSynthesis?.cancel();
+    setSpeakingId(null);
+    setDraft('');
+    setRequestError('');
+    const userMessage: ChatMessage = { role: 'user', content: text, id: nextMessageId.current++ };
+    const nextMessages = [...messages, userMessage];
+    setMessages(nextMessages);
+    setBusy(true);
+
+    try {
+      const response = await fetch(chatEndpoint(), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({
+          language: replyLanguage,
+          messages: nextMessages.slice(-12).map(({ role, content: messageContent }) => ({ role, content: messageContent })),
+        }),
+        signal: AbortSignal.timeout(65_000),
+      });
+      const data = await response.json().catch(() => null) as { content?: unknown; error?: unknown; code?: unknown } | null;
+      if (!response.ok) {
+        if (data?.code === 'config_missing') throw new Error(t.configMissing);
+        if (data?.code === 'rate_limited') throw new Error(t.rateLimited);
+        if (typeof data?.error === 'string') throw new Error(data.error);
+        throw new Error(t.requestError);
+      }
+      const answer = typeof data?.content === 'string' ? data.content.trim() : '';
+      if (!answer) throw new Error(t.requestError);
+      const answerId = nextMessageId.current++;
+      setMessages((current) => [...current, { role: 'assistant', content: answer, id: answerId }]);
+      if (fromVoice) speak({ role: 'assistant', content: answer, id: answerId });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '';
+      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      setRequestError(!message || message === 'Failed to fetch' || timedOut || /timed out/i.test(message) ? t.requestError : message);
+    } finally {
+      setBusy(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  const speak = (message: ChatMessage) => {
+    if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+      setVoiceError(t.voiceUnsupported);
+      return;
+    }
+    if (speakingId === message.id) {
+      window.speechSynthesis.cancel();
+      setSpeakingId(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(message.content);
+    utterance.lang = replyLanguage === 'bn' ? 'bn-BD' : 'en-US';
+    utterance.onend = () => setSpeakingId(null);
+    utterance.onerror = () => setSpeakingId(null);
+    setSpeakingId(message.id);
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const clearConversation = () => {
+    stopListening();
+    window.speechSynthesis?.cancel();
+    setSpeakingId(null);
+    setMessages([]);
+    setDraft('');
+    setRequestError('');
+    setVoiceError('');
+    nextMessageId.current = 1;
+    inputRef.current?.focus();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-4"
+      role="presentation"
+      onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="ai-talk-title"
+        className="flex h-[min(92dvh,780px)] w-full max-w-2xl flex-col overflow-hidden rounded-t-3xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] shadow-2xl sm:rounded-3xl"
+      >
+        <header className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3 sm:px-5">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[var(--accent-soft)] text-[var(--accent-primary)]">
+            <Bot className="h-5 w-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h2 id="ai-talk-title" className="font-display text-lg font-bold text-[var(--text-primary)]">{t.title}</h2>
+            <p className="text-xs text-[var(--text-secondary)]">{t.subtitle}</p>
+          </div>
+          <label className="hidden items-center gap-1.5 text-xs text-[var(--text-muted)] sm:flex">
+            <span>{t.language}</span>
+            <select
+              value={replyLanguage}
+              onChange={(event) => setReplyLanguage(event.target.value as Language)}
+              className="min-h-9 rounded-lg border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-2 text-[var(--text-primary)]"
+              aria-label={t.language}
+            >
+              <option value="bn">{t.bangla}</option>
+              <option value="en">{t.english}</option>
+            </select>
+          </label>
+          <button type="button" onClick={onClose} aria-label={t.close} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-primary)]">
+            <X className="h-5 w-5" />
+          </button>
+        </header>
+
+        <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] px-4 py-2 sm:hidden">
+          <span className="text-xs text-[var(--text-muted)]">{t.language}</span>
+          <button type="button" onClick={() => setReplyLanguage('bn')} aria-pressed={replyLanguage === 'bn'} className={cn('rounded-lg px-3 py-1.5 text-xs font-medium', replyLanguage === 'bn' ? 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]' : 'text-[var(--text-secondary)] hover:bg-[var(--accent-soft)]')}>{t.bangla}</button>
+          <button type="button" onClick={() => setReplyLanguage('en')} aria-pressed={replyLanguage === 'en'} className={cn('rounded-lg px-3 py-1.5 text-xs font-medium', replyLanguage === 'en' ? 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]' : 'text-[var(--text-secondary)] hover:bg-[var(--accent-soft)]')}>{t.english}</button>
+          <button type="button" onClick={clearConversation} aria-label={t.clear} className="ml-auto inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-xs text-[var(--text-secondary)] hover:bg-[var(--accent-soft)]">
+            <Plus className="h-4 w-4" />{t.clear}
+          </button>
+        </div>
+
+        <div ref={listRef} className="flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-6" aria-live="polite" aria-relevant="additions text">
+          {messages.length === 0 && (
+            <div className="mx-auto flex max-w-md flex-col items-center py-8 text-center">
+              <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-7 w-7" /></span>
+              <p className="text-sm leading-relaxed text-[var(--text-primary)]">{t.welcome}</p>
+              <div className="mt-6 flex flex-wrap justify-center gap-2">
+                {t.prompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void sendMessage(prompt)}
+                    className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2 text-left text-xs leading-relaxed text-[var(--text-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] disabled:opacity-50"
+                  >{prompt}</button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {messages.map((message) => (
+            <div key={message.id} className={cn('flex gap-2.5', message.role === 'user' ? 'justify-end' : 'justify-start')}>
+              {message.role === 'assistant' && (
+                <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-4 w-4" /></span>
+              )}
+              <div className={cn('max-w-[88%] rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap [overflow-wrap:anywhere]', message.role === 'user' ? 'rounded-br-md bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]' : 'rounded-bl-md border border-[var(--border-subtle)] bg-[var(--bg-canvas)] text-[var(--text-primary)]')}>
+                {message.content}
+                {message.role === 'assistant' && (
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => speak(message)}
+                      aria-label={speakingId === message.id ? t.stopSpeaking : t.playAloud}
+                      title={speakingId === message.id ? t.stopSpeaking : t.playAloud}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[var(--text-muted)] hover:bg-[var(--accent-soft)] hover:text-[var(--accent-primary)]"
+                    >{speakingId === message.id ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}</button>
+                  </div>
+                )}
+              </div>
+            </div>
+          ))}
+
+          {busy && (
+            <div className="flex items-center gap-2.5 text-sm text-[var(--text-muted)]" role="status">
+              <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-4 w-4" /></span>
+              <span className="inline-flex items-center gap-2"><LoaderCircle className="h-4 w-4 animate-spin" />{t.thinking}</span>
+            </div>
+          )}
+          {requestError && <p role="alert" className="rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs leading-relaxed text-red-700 dark:text-red-300">{requestError}</p>}
+          {listening && <p className="text-center text-xs text-[var(--accent-primary)]" role="status">{t.listening}</p>}
+        </div>
+
+
+        <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pb-safe pt-3 sm:px-5">
+          <form
+            onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}
+            className="flex items-end gap-2"
+          >
+            <button
+              type="button"
+              onClick={listening ? stopListening : startListening}
+              disabled={busy}
+              aria-label={listening ? t.stopListening : t.startListening}
+              title={listening ? t.stopListening : t.startListening}
+              className={cn('mb-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors disabled:opacity-45', listening ? 'bg-red-600 text-white' : 'bg-[var(--accent-soft)] text-[var(--accent-primary)] hover:opacity-80')}
+            >{listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}</button>
+            <textarea
+              ref={inputRef}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
+                  void sendMessage();
+                }
+              }}
+              maxLength={1200}
+              rows={1}
+              placeholder={t.placeholder}
+              aria-label={t.placeholder}
+              className="max-h-32 min-h-11 flex-1 resize-y rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-3 text-sm leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
+            />
+            <button
+              type="submit"
+              disabled={busy || !draft.trim()}
+              aria-label={t.send}
+              className="mb-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
+            >{busy ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button>
+          </form>
+          <div className="flex items-start justify-between gap-3 py-2">
+            <p className="max-w-xl text-[10px] leading-relaxed text-[var(--text-muted)]">{t.disclaimer}</p>
+            <button
+              type="button"
+              onClick={clearConversation}
+              aria-label={t.clear}
+              className="hidden shrink-0 rounded-lg px-2 py-1 text-[11px] font-medium text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] sm:inline-flex"
+            >{t.clear}</button>
+          </div>
+          {voiceError && <p role="status" className="pb-2 text-[11px] leading-relaxed text-amber-700 dark:text-amber-300">{voiceError}</p>}
+        </footer>
+      </section>
+    </div>
+  );
+};
+

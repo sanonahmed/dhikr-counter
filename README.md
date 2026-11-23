@@ -16,6 +16,7 @@ An offline-first, modern Progressive Web App (PWA) for Islamic Dhikr, Durood, Is
 - **Statistics & History**: Detailed analytics, streak history, charts, and milestones.
 - **Data Backup & Restore**: Export and import your dhikr history and custom adhkars seamlessly.
 - **Customization Studio**: Multiple visual themes, bead styles, dial animations, and font settings.
+- **AI Talk**: A Bangla-first companion for discussing prayer and dhikr, with voice input and spoken replies in supported browsers.
 
 ---
 

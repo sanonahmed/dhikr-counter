@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BarChart3,
   Bell,
+  Bot,
   BookOpen,
   Clock,
   FolderHeart,
@@ -19,6 +20,7 @@ import type { Language, PageRoute } from '../types/dhikr';
 import { getTranslations } from '../i18n/translations';
 import { cn } from '../utils/cn';
 import { PWAInstallButton } from './PWAInstallBanner';
+import { AiTalkOverlay } from './AiTalkOverlay';
 
 interface LayoutProps {
   currentPage: PageRoute;
@@ -44,6 +46,7 @@ export const Layout: React.FC<LayoutProps> = ({
   children,
 }) => {
   const t = getTranslations(language);
+  const [aiTalkOpen, setAiTalkOpen] = React.useState(false);
 
   // Hidden owner entry point. The emblem behaves normally on a tap; holding it
   // for a moment opens the admin panel. Nothing in the UI advertises this.
@@ -158,7 +161,22 @@ export const Layout: React.FC<LayoutProps> = ({
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-4 space-y-6" aria-label="Main navigation">
-          <div className="space-y-1">
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => setAiTalkOpen(true)}
+              aria-haspopup="dialog"
+              aria-expanded={aiTalkOpen}
+              className={cn(
+                'w-full flex items-center gap-3 px-3.5 py-3 rounded-xl text-sm font-semibold transition-colors cursor-pointer',
+                aiTalkOpen
+                  ? 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)]'
+                  : 'bg-[var(--accent-soft)] text-[var(--accent-primary)] hover:opacity-80'
+              )}
+            >
+              <Bot className="w-4 h-4 shrink-0" />
+              <span>{t.nav.aiTalk}</span>
+            </button>
             {primaryTabs.map((item) => {
               const Icon = item.icon;
               const active = currentPage === item.id;
@@ -246,6 +264,17 @@ export const Layout: React.FC<LayoutProps> = ({
                 <WifiOff className="w-3.5 h-3.5 text-amber-600" aria-label="Offline" />
               )}
             </span>
+            <button
+              type="button"
+              onClick={() => setAiTalkOpen(true)}
+              aria-label={t.nav.aiTalk}
+              aria-haspopup="dialog"
+              aria-expanded={aiTalkOpen}
+              className="h-9 px-3 inline-flex items-center gap-1.5 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-primary)] text-xs font-semibold cursor-pointer"
+            >
+              <Bot className="w-4 h-4" />
+              <span>{t.nav.aiTalk}</span>
+            </button>
             <PWAInstallButton
               isInstallable={isInstallable}
               isInstalled={isInstalled}
@@ -288,6 +317,12 @@ export const Layout: React.FC<LayoutProps> = ({
           })}
         </div>
       </nav>
+
+      <AiTalkOverlay
+        open={aiTalkOpen}
+        onClose={() => setAiTalkOpen(false)}
+        language={language}
+      />
     </div>
   );
 };

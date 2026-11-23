@@ -20,6 +20,13 @@ Add the passcode to the environment of the **Node service** (`server.js`):
 | `AI_BASE_URL`, `AI_MODEL` | no | OpenAI-compatible endpoint and model used by that relay. |
 | `VITE_AI_PROXY_URL` | static hosting | Build-time URL of the Node service, so the panel knows where to sign in. |
 
+The server-side AI settings above also power the public **AI Talk** companion in
+the app header. AI Talk never accepts a provider URL or key from the browser. It
+uses the same configured provider/model with a Bangla-first system prompt, a
+12-message history limit, and a per-IP limit of 8 requests per 10 minutes. If the
+server has no key configured, the overlay shows a setup message instead of
+calling the provider.
+
 Locally: put them in `.env.local` and run `npm run dev`. On Render: add them to
 the web service (the blueprint already lists `ADMIN_PASSCODE`), then redeploy.
 

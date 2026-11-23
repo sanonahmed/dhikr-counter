@@ -56,7 +56,13 @@ if (process.env.NODE_ENV !== 'production') {
 const PORT = Number(process.env.PORT) || 8787;
 const PROVIDER_TIMEOUT_MS = 60_000;
 const MAX_PROMPT_LENGTH = 4_000;
+const AI_TALK_WINDOW_MS = 10 * 60_000;
+const AI_TALK_REQUESTS_PER_WINDOW = 8;
+const AI_TALK_MAX_MESSAGES = 12;
+const AI_TALK_MAX_MESSAGE_LENGTH = 1_200;
 const MAX_TOKENS_LIMIT = 2_000;
+/** Client IP -> request timestamps for the public AI Talk endpoint. */
+const aiTalkRequests = new Map();
 
 /**
  * Private admin panel.
@@ -524,6 +530,116 @@ app.post('/api/ai/chat', requireAdmin, async (req, res) => {
     }
     const reason = error instanceof Error ? error.message : 'Unknown error';
     res.status(502).json({ error: `Could not reach the AI provider: ${reason}` });
+  }
+});
+
+/**
+ * Public AI Talk endpoint. Unlike the admin-only AI studio, this route accepts
+ * no provider URL/key/model from the browser and only uses server defaults.
+ * Per-IP limits and strict message bounds prevent accidental runaway usage.
+ */
+app.post('/api/ai/talk', async (req, res) => {
+  const body = req.body ?? {};
+  const messages = body.messages;
+  if (!Array.isArray(messages) || messages.length < 1 || messages.length > AI_TALK_MAX_MESSAGES) {
+    res.status(400).json({ error: `Send between 1 and ${AI_TALK_MAX_MESSAGES} messages.`, code: 'invalid_messages' });
+    return;
+  }
+
+  const cleanMessages = [];
+  for (const message of messages) {
+    if (!message || !['user', 'assistant'].includes(message.role) || typeof message.content !== 'string') {
+      res.status(400).json({ error: 'Messages must have a user or assistant role and text content.', code: 'invalid_messages' });
+      return;
+    }
+    const content = message.content.trim();
+    if (!content || content.length > AI_TALK_MAX_MESSAGE_LENGTH) {
+      res.status(400).json({ error: `Each message must contain 1–${AI_TALK_MAX_MESSAGE_LENGTH} characters.`, code: 'invalid_messages' });
+      return;
+    }
+    cleanMessages.push({ role: message.role, content });
+  }
+  if (cleanMessages.at(-1)?.role !== 'user') {
+    res.status(400).json({ error: 'The latest message must be from the user.', code: 'invalid_messages' });
+    return;
+  }
+
+  const { key, baseUrl, model } = providerDefaults();
+  if (!key || !model) {
+    res.status(503).json({
+      error: 'AI Talk is not configured. The site owner must set an AI provider key and model on the Node server.',
+      code: 'config_missing',
+    });
+    return;
+  }
+
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const recent = (aiTalkRequests.get(ip) || []).filter((timestamp) => now - timestamp < AI_TALK_WINDOW_MS);
+  if (recent.length >= AI_TALK_REQUESTS_PER_WINDOW) {
+    const retryAfterSeconds = Math.max(1, Math.ceil((AI_TALK_WINDOW_MS - (now - recent[0])) / 1000));
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+    res.status(429).json({ error: 'AI Talk is temporarily rate-limited. Please try again shortly.', code: 'rate_limited' });
+    return;
+  }
+  if (!aiTalkRequests.has(ip) && aiTalkRequests.size >= 10_000) {
+    aiTalkRequests.delete(aiTalkRequests.keys().next().value);
+  }
+  recent.push(now);
+  aiTalkRequests.set(ip, recent);
+
+  let endpoint;
+  try {
+    endpoint = buildChatEndpoint(baseUrl);
+  } catch {
+    res.status(503).json({ error: 'AI Talk is temporarily unavailable because the provider configuration is invalid.', code: 'provider_unavailable' });
+    return;
+  }
+
+  const replyLanguage = body.language === 'bn' ? 'Bangla (বাংলা)' : 'English';
+  const systemPrompt = [
+    'You are a warm, respectful, non-judgmental Muslim prayer and dhikr companion. Help users reflect and build gentle, sustainable worship habits.',
+    `Reply in ${replyLanguage}. If the user writes in Bangla, understand it naturally; when Bangla is requested, answer in clear, conversational Bangla script.`,
+    'Do not invent Quran verses, hadith, citations, religious rulings, or specific promised rewards. If unsure, say so. For fiqh or personal religious rulings, recommend a trusted qualified scholar rather than presenting yourself as an authority.',
+    'Offer compassionate listening. Do not shame the user. For urgent danger or serious mental-health concerns, encourage contacting a trusted person and appropriate local professional/emergency support.',
+    'Keep replies clear, kind, and reasonably concise. Do not claim to be human or a scholar.',
+  ].join(' ');
+
+  try {
+    const upstream = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+      body: JSON.stringify({
+        model,
+        max_tokens: 900,
+        messages: [{ role: 'system', content: systemPrompt }, ...cleanMessages],
+      }),
+      signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+    });
+    const text = await upstream.text();
+    let payload = null;
+    try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+    if (!upstream.ok) {
+      res.status(502).json({ error: upstreamErrorMessage(upstream.status, payload), code: 'provider_error' });
+      return;
+    }
+    const rawContent = payload?.choices?.[0]?.message?.content;
+    const content = typeof rawContent === 'string'
+      ? rawContent.trim()
+      : Array.isArray(rawContent)
+        ? rawContent.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('').trim()
+        : '';
+    if (!content) {
+      res.status(502).json({ error: 'The AI provider returned an empty response.', code: 'provider_error' });
+      return;
+    }
+    res.json({ content });
+  } catch (error) {
+    if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
+      res.status(504).json({ error: 'The AI provider did not respond in time.', code: 'provider_timeout' });
+      return;
+    }
+    res.status(502).json({ error: 'Could not connect to the configured AI provider.', code: 'provider_unavailable' });
   }
 });
 
