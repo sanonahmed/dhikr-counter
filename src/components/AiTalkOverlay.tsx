@@ -4,6 +4,7 @@ import type { Language } from '../types/dhikr';
 import { getTranslations } from '../i18n/translations';
 import { resolveAdminServerUrl } from '../utils/adminSession';
 import { cn } from '../utils/cn';
+import { toPlainText } from '../../shared/plainText.js';
 
 interface AiTalkOverlayProps { open: boolean; onClose: () => void; language: Language; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; id: number; }
@@ -11,7 +12,7 @@ interface SpeechRecognitionResultLike { transcript: string; isFinal?: boolean; }
 interface SpeechRecognitionEventLike { resultIndex?: number; results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>; }
 interface SpeechRecognitionErrorLike { error: string; }
 interface SpeechRecognitionLike {
-  lang: string; interimResults: boolean; maxAlternatives: number;
+  lang: string; interimResults: boolean; maxAlternatives: number; continuous: boolean;
   onresult: ((event: SpeechRecognitionEventLike) => void) | null;
   onerror: ((event: SpeechRecognitionErrorLike) => void) | null;
   onend: (() => void) | null; start: () => void; stop: () => void;
@@ -29,6 +30,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
+  const [continuousMode, setContinuousMode] = useState(false);
   const [interim, setInterim] = useState('');
   const [voiceError, setVoiceError] = useState('');
   const [requestError, setRequestError] = useState('');
@@ -36,6 +38,18 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   const micRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+  const restartTimerRef = useRef<number | null>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const autoListenRef = useRef(false);
+  const busyRef = useRef(false);
+  const speakingRef = useRef(false);
+  const speechTokenRef = useRef(0);
+  const messagesRef = useRef<ChatMessage[]>([]);
+  const replyLanguageRef = useRef<Language>(replyLanguage);
+  replyLanguageRef.current = replyLanguage;
+  messagesRef.current = messages;
+  const startRecognitionRef = useRef<() => void>(() => {});
+  const askAssistantRef = useRef<(content: string) => void>(() => {});
   const nextMessageId = useRef(1);
 
   useEffect(() => {
@@ -48,10 +62,19 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
+      autoListenRef.current = false;
+      busyRef.current = false;
+      requestRef.current?.abort();
+      requestRef.current = null;
+      speakingRef.current = false;
+      speechTokenRef.current += 1;
+      if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
       recognitionRef.current?.stop();
       recognitionRef.current = null;
       window.speechSynthesis?.cancel();
       setListening(false);
+      setContinuousMode(false);
       setInterim('');
       setSpeakingId(null);
     };
@@ -63,25 +86,52 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
 
   if (!open) return null;
 
-  const stopListening = () => {
-    recognitionRef.current?.stop();
+  const scheduleAutoListen = () => {
+    if (!autoListenRef.current || busyRef.current || speakingRef.current) return;
+    if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = window.setTimeout(() => {
+      restartTimerRef.current = null;
+      if (autoListenRef.current && !busyRef.current && !speakingRef.current) startRecognitionRef.current();
+    }, 300);
+  };
+
+  const pauseRecognition = () => {
+    const recognition = recognitionRef.current;
     recognitionRef.current = null;
+    recognition?.stop();
     setListening(false);
     setInterim('');
   };
 
-  const startListening = () => {
-    const speechWindow = window as SpeechRecognitionWindow;
-    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
-    setVoiceError('');
+  const stopListening = () => {
+    autoListenRef.current = false;
+    setContinuousMode(false);
+    if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = null;
+    pauseRecognition();
+    requestRef.current?.abort();
+    speechTokenRef.current += 1;
+    speakingRef.current = false;
     window.speechSynthesis?.cancel();
     setSpeakingId(null);
-    if (!Recognition) { setVoiceError(t.unavailable); return; }
+  };
+
+  const startRecognition = () => {
+    if (!autoListenRef.current || busyRef.current || speakingRef.current || recognitionRef.current) return;
+    const speechWindow = window as SpeechRecognitionWindow;
+    const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
+    if (!Recognition) {
+      autoListenRef.current = false;
+      setContinuousMode(false);
+      setVoiceError(t.unavailable);
+      return;
+    }
     try {
       const recognition = new Recognition();
       recognition.lang = replyLanguage === 'bn' ? 'bn-BD' : 'en-US';
       recognition.interimResults = true;
       recognition.maxAlternatives = 1;
+      recognition.continuous = true;
       recognition.onresult = (event) => {
         let finalTranscript = '';
         let interimTranscript = '';
@@ -93,46 +143,84 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
           else finalTranscript += `${transcript} `;
         }
         setInterim(interimTranscript.trim());
-        if (finalTranscript.trim()) void askAssistant(finalTranscript.trim());
+        if (finalTranscript.trim()) askAssistantRef.current(finalTranscript.trim());
       };
       recognition.onerror = (event) => {
-        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') setVoiceError(t.micDenied);
-        else if (event.error === 'no-speech') setVoiceError(t.noSpeech);
-        else if (event.error === 'network') setVoiceError(t.networkError);
+        if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+          autoListenRef.current = false;
+          setContinuousMode(false);
+          setVoiceError(t.micDenied);
+        } else if (event.error === 'no-speech') {
+          if (!autoListenRef.current) setVoiceError(t.noSpeech);
+        } else if (event.error === 'aborted') {
+          // We stopped the recognizer ourselves, so this is not a failure.
+        } else if (event.error === 'network') setVoiceError(t.networkError);
         else setVoiceError(t.voiceError);
       };
-      recognition.onend = () => { recognitionRef.current = null; setListening(false); setInterim(''); };
+      recognition.onend = () => {
+        if (recognitionRef.current !== recognition) return;
+        recognitionRef.current = null;
+        setListening(false);
+        setInterim('');
+        scheduleAutoListen();
+      };
       recognitionRef.current = recognition;
       setListening(true);
       recognition.start();
     } catch {
       recognitionRef.current = null;
       setListening(false);
+      if (autoListenRef.current) {
+        autoListenRef.current = false;
+        setContinuousMode(false);
+      }
       setVoiceError(t.voiceError);
     }
   };
 
+  startRecognitionRef.current = startRecognition;
+
+  const startListening = () => {
+    setVoiceError('');
+    autoListenRef.current = true;
+    setContinuousMode(true);
+    window.speechSynthesis?.cancel();
+    speechTokenRef.current += 1;
+    speakingRef.current = false;
+    setSpeakingId(null);
+    if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
+    restartTimerRef.current = null;
+    startRecognition();
+  };
+
   const askAssistant = async (content: string) => {
     const text = content.trim();
-    if (!text || busy || text.length > 1200) return;
-    stopListening();
+    if (!text || busyRef.current || text.length > 1200) return;
+    pauseRecognition();
     window.speechSynthesis?.cancel();
+    speechTokenRef.current += 1;
+    speakingRef.current = false;
     setSpeakingId(null);
     setRequestError('');
     const userMessage: ChatMessage = { role: 'user', content: text, id: nextMessageId.current++ };
-    const nextMessages = [...messages, userMessage];
+    const nextMessages = [...messagesRef.current, userMessage];
+    messagesRef.current = nextMessages;
     setMessages(nextMessages);
+    busyRef.current = true;
     setBusy(true);
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = window.setTimeout(() => controller.abort(), 65_000);
 
     try {
       const response = await fetch(chatEndpoint(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
-          language: replyLanguage,
+          language: replyLanguageRef.current,
           messages: nextMessages.slice(-12).map(({ role, content: messageContent }) => ({ role, content: messageContent })),
         }),
-        signal: AbortSignal.timeout(65_000),
+        signal: controller.signal,
       });
       const data = await response.json().catch(() => null) as { content?: unknown; error?: unknown; code?: unknown } | null;
       if (!response.ok) {
@@ -141,44 +229,67 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
         if (typeof data?.error === 'string') throw new Error(data.error);
         throw new Error(t.requestError);
       }
-      const answer = typeof data?.content === 'string' ? data.content.trim() : '';
+      const answer = toPlainText(typeof data?.content === 'string' ? data.content : '');
       if (!answer) throw new Error(t.requestError);
       const answerId = nextMessageId.current++;
-      setMessages((current) => [...current, { role: 'assistant', content: answer, id: answerId }]);
-      speak({ role: 'assistant', content: answer, id: answerId });
+      const assistantMessage = { role: 'assistant' as const, content: answer, id: answerId };
+      messagesRef.current = [...messagesRef.current, assistantMessage];
+      setMessages(messagesRef.current);
+      speak(assistantMessage);
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
-      const timedOut = error instanceof Error && error.name === 'TimeoutError';
+      // A tap on the microphone aborts the request; that is not a failure.
+      if (error instanceof Error && error.name === 'AbortError' && !autoListenRef.current) return;
+      const timedOut = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError');
       setRequestError(!message || message === 'Failed to fetch' || timedOut || /timed out/i.test(message) ? t.requestError : message);
     } finally {
+      window.clearTimeout(timeout);
+      requestRef.current = null;
+      busyRef.current = false;
       setBusy(false);
       micRef.current?.focus();
+      if (autoListenRef.current && !speakingRef.current) scheduleAutoListen();
     }
   };
+
+  askAssistantRef.current = (content) => { void askAssistant(content); };
 
   const speak = (message: ChatMessage) => {
     if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
       setVoiceError(t.voiceUnsupported);
       return;
     }
-    if (speakingId === message.id) {
+    if (speakingRef.current && speakingId === message.id) {
+      speechTokenRef.current += 1;
+      speakingRef.current = false;
       window.speechSynthesis.cancel();
       setSpeakingId(null);
+      if (autoListenRef.current && !busyRef.current) scheduleAutoListen();
       return;
     }
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(message.content);
-    utterance.lang = replyLanguage === 'bn' ? 'bn-BD' : 'en-US';
-    utterance.onend = () => setSpeakingId(null);
-    utterance.onerror = () => setSpeakingId(null);
+    const token = ++speechTokenRef.current;
+    const utterance = new SpeechSynthesisUtterance(toPlainText(message.content));
+    utterance.lang = replyLanguageRef.current === 'bn' ? 'bn-BD' : 'en-US';
+    const finishSpeaking = () => {
+      if (speechTokenRef.current !== token) return;
+      speakingRef.current = false;
+      setSpeakingId(null);
+      if (autoListenRef.current && !busyRef.current) scheduleAutoListen();
+    };
+    speakingRef.current = true;
+    utterance.onend = finishSpeaking;
+    utterance.onerror = finishSpeaking;
     setSpeakingId(message.id);
     window.speechSynthesis.speak(utterance);
   };
 
   const clearConversation = () => {
     stopListening();
+    requestRef.current?.abort();
     window.speechSynthesis?.cancel();
     setSpeakingId(null);
+    messagesRef.current = [];
     setMessages([]);
     setRequestError('');
     setVoiceError('');
@@ -284,13 +395,12 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
             <button
               ref={micRef}
               type="button"
-              onClick={listening ? stopListening : startListening}
-              disabled={busy}
-              aria-label={listening ? t.stopListening : t.startListening}
-              title={listening ? t.stopListening : t.startListening}
-              className={cn('inline-flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition-all disabled:cursor-wait disabled:opacity-60', listening ? 'animate-pulse bg-red-600 text-white ring-4 ring-red-500/20' : 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] hover:scale-105')}
-            >{listening ? <MicOff className="h-7 w-7" /> : busy ? <LoaderCircle className="h-7 w-7 animate-spin" /> : <Mic className="h-7 w-7" />}</button>
-            <p className="text-center text-xs text-[var(--text-secondary)]">{busy ? t.thinking : listening ? t.stopListening : messages.length > 0 ? t.tapToReply : t.tapToSpeak}</p>
+              onClick={continuousMode ? stopListening : startListening}
+              aria-label={continuousMode ? t.stopListening : t.startListening}
+              title={continuousMode ? t.stopListening : t.startListening}
+              className={cn('inline-flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition-all', continuousMode ? 'animate-pulse bg-red-600 text-white ring-4 ring-red-500/20' : 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] hover:scale-105')}
+            >{continuousMode ? <MicOff className="h-7 w-7" /> : busy ? <LoaderCircle className="h-7 w-7 animate-spin" /> : <Mic className="h-7 w-7" />}</button>
+            <p className="text-center text-xs text-[var(--text-secondary)]">{busy ? t.thinking : continuousMode ? (listening ? t.stopListening : replyLanguage === 'bn' ? 'প্রতিটি উত্তরের পর আবার শুনব। বন্ধ করতে মাইক্রোফোনে ট্যাপ করুন।' : 'Hands-free is on. I will listen again after each answer. Tap to stop.') : messages.length > 0 ? t.tapToReply : t.tapToSpeak}</p>
           </div>
           <div className="flex items-start justify-between gap-3 py-2">
             <p className="max-w-xl text-[10px] leading-relaxed text-[var(--text-muted)]">{t.disclaimer}</p>

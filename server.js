@@ -19,6 +19,7 @@ const require = createRequire(import.meta.url);
 const webpush = require('web-push');
 import { createPushRuntime } from './server/push/runtime.js';
 import { registerPushRoutes } from './server/push/router.js';
+import { toPlainText } from './shared/plainText.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Load ignored local secrets first; already-exported environment and .env values
@@ -603,6 +604,7 @@ app.post('/api/ai/talk', async (req, res) => {
     'Do not invent Quran verses, hadith, citations, religious rulings, or specific promised rewards. If unsure, say so. For fiqh or personal religious rulings, recommend a trusted qualified scholar rather than presenting yourself as an authority.',
     'Offer compassionate listening. Do not shame the user. For urgent danger or serious mental-health concerns, encourage contacting a trusted person and appropriate local professional/emergency support.',
     'Keep replies clear, kind, and reasonably concise. Do not claim to be human or a scholar.',
+    'Return only the plain answer. Do not use emojis, markdown, bullet points, decorative marks, hashtags, or symbols. Use ordinary words and only basic sentence punctuation.',
   ].join(' ');
 
   try {
@@ -624,11 +626,11 @@ app.post('/api/ai/talk', async (req, res) => {
       return;
     }
     const rawContent = payload?.choices?.[0]?.message?.content;
-    const content = typeof rawContent === 'string'
-      ? rawContent.trim()
+    const content = toPlainText(typeof rawContent === 'string'
+      ? rawContent
       : Array.isArray(rawContent)
-        ? rawContent.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('').trim()
-        : '';
+        ? rawContent.map((part) => (typeof part?.text === 'string' ? part.text : '')).join('')
+        : '');
     if (!content) {
       res.status(502).json({ error: 'The AI provider returned an empty response.', code: 'provider_error' });
       return;

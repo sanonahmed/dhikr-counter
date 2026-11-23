@@ -23,8 +23,11 @@ const provider = http.createServer((req, res) => {
       res.end(JSON.stringify({ error: { message: 'Bad key' } }));
       return;
     }
+    const reply = body.messages?.[0]?.role === 'system'
+      ? `**Mock reply for model ${body.model}** 😀 ✨`
+      : `Mock reply for model ${body.model}`;
     res.end(JSON.stringify({
-      choices: [{ message: { content: `Mock reply for model ${body.model}` } }],
+      choices: [{ message: { content: reply } }],
     }));
   });
 });
@@ -314,10 +317,11 @@ try {
   });
   const publicTalkData = await publicTalk.json();
   check(
-    'public AI Talk works without an admin session and uses configured provider',
+    'public AI Talk sanitizes AI output and uses configured provider',
     publicTalk.status === 200 && publicTalkData.content === 'Mock reply for model mock-model' &&
       lastProviderBody?.messages?.length === 4 && lastProviderBody?.messages?.[0]?.role === 'system' &&
       /Bangla/.test(lastProviderBody?.messages?.[0]?.content || '') &&
+      /plain answer/i.test(lastProviderBody?.messages?.[0]?.content || '') &&
       lastProviderBody?.messages?.[3]?.content === 'বাংলায় সহজ করে বলুন।',
     `${publicTalk.status} ${JSON.stringify(publicTalkData)}`
   );
