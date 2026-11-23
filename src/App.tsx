@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Bell, X } from 'lucide-react';
 import { db, ensureDatabaseSeeded } from './db/database';
@@ -46,6 +46,52 @@ const AboutPrivacyPage = lazy(() =>
 );
 const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 
+const PAGE_ROUTES: PageRoute[] = [
+  'home',
+  'counter',
+  'library',
+  'dhikr-detail',
+  'custom-dhikr',
+  'collections',
+  'goals',
+  'salah',
+  'statistics',
+  'history',
+  'customization',
+  'reminders',
+  'settings',
+  'admin',
+  'backup',
+  'about',
+];
+
+interface AppHistoryState {
+  page: PageRoute;
+  aiTalk: boolean;
+  index: number;
+}
+
+const isPageRoute = (value: unknown): value is PageRoute =>
+  typeof value === 'string' && PAGE_ROUTES.includes(value as PageRoute);
+
+const readHistoryState = (value: unknown): AppHistoryState | null => {
+  if (!value || typeof value !== 'object') return null;
+  const state = value as Record<string, unknown>;
+  if (!isPageRoute(state.page)) return null;
+  return {
+    page: state.page,
+    aiTalk: state.aiTalk === true,
+    index:
+      typeof state.index === 'number' && Number.isFinite(state.index)
+        ? Math.max(0, Math.floor(state.index))
+        : 0,
+  };
+};
+
+const hasAdminHash = () => window.location.hash.replace('#', '').toLowerCase() === 'admin';
+
+const initialPageFromUrl = (): PageRoute => (hasAdminHash() ? 'admin' : 'home');
+
 function PageLoader() {
   return (
     <div className="py-16 flex items-center justify-center text-sm text-[var(--text-muted)]">
@@ -66,7 +112,13 @@ export default function App() {
   const pwa = usePWAInstall();
 
   const [dbReady, setDbReady] = useState(false);
-  const [currentPage, setCurrentPage] = useState<PageRoute>('home');
+  const [currentPage, setCurrentPage] = useState<PageRoute>(initialPageFromUrl);
+  const [aiTalkOpen, setAiTalkOpen] = useState(false);
+  const historyIndexRef = useRef(0);
+  const currentPageRef = useRef(currentPage);
+  const aiTalkOpenRef = useRef(aiTalkOpen);
+  currentPageRef.current = currentPage;
+  aiTalkOpenRef.current = aiTalkOpen;
   const [activeDhikrId, setActiveDhikrId] = useState<string>(settings.defaultDhikrId);
   const [detailDhikrId, setDetailDhikrId] = useState<string | null>(null);
   const [editingDhikr, setEditingDhikr] = useState<DhikrItem | null>(null);
@@ -100,30 +152,143 @@ export default function App() {
         .filter((s) => s.dhikrId === activeDhikr?.id && s.status === 'in_progress')
         .sort((a, b) => b.lastUpdatedAt - a.lastUpdatedAt)[0];
 
-  const handleNavigate = (page: PageRoute) => {
+  // Each page transition is a real browser/PWA history entry. This is what
+  // keeps the system Back button inside the app instead of closing it while a
+  // section (Settings, Counter, AI Talk, ...) is open.
+  const navigateTo = useCallback((page: PageRoute, options?: { replace?: boolean }) => {
+    const overlayWasOpen = aiTalkOpenRef.current;
+    const replace = options?.replace === true || overlayWasOpen;
+
+    setAiTalkOpen(false);
+    aiTalkOpenRef.current = false;
+
+    if (!replace && page === currentPageRef.current) return;
+
+    const currentState = readHistoryState(window.history.state);
+    const baseIndex = currentState?.index ?? historyIndexRef.current;
+    const index = replace ? baseIndex : baseIndex + 1;
+    const nextState: AppHistoryState = { page, aiTalk: false, index };
+    // Drop the hidden `#admin` deep link once the owner leaves the panel.
+    const url =
+      page !== 'admin' && hasAdminHash()
+        ? `${window.location.pathname}${window.location.search}`
+        : undefined;
+
+    if (replace) {
+      window.history.replaceState(nextState, '', url);
+    } else {
+      window.history.pushState(nextState, '', url);
+    }
+
+    historyIndexRef.current = index;
+    currentPageRef.current = page;
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'auto' });
-    // Drop the hidden `#admin` deep link once the owner leaves the panel.
-    if (page !== 'admin' && window.location.hash.replace('#', '').toLowerCase() === 'admin') {
-      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+  }, []);
+
+  const openAiTalk = useCallback(() => {
+    if (aiTalkOpenRef.current) return;
+    const currentState = readHistoryState(window.history.state);
+    const index = (currentState?.index ?? historyIndexRef.current) + 1;
+    window.history.pushState(
+      { page: currentPageRef.current, aiTalk: true, index } satisfies AppHistoryState,
+      ''
+    );
+    historyIndexRef.current = index;
+    aiTalkOpenRef.current = true;
+    setAiTalkOpen(true);
+  }, []);
+
+  const closeAiTalk = useCallback(() => {
+    if (!aiTalkOpenRef.current) return;
+    aiTalkOpenRef.current = false;
+    setAiTalkOpen(false);
+
+    const currentState = readHistoryState(window.history.state);
+    if (currentState?.aiTalk) {
+      window.history.back();
+      return;
     }
+
+    window.history.replaceState(
+      {
+        page: currentPageRef.current,
+        aiTalk: false,
+        index: currentState?.index ?? historyIndexRef.current,
+      } satisfies AppHistoryState,
+      ''
+    );
+  }, []);
+
+  const goBack = useCallback(
+    (fallbackPage: PageRoute) => {
+      if (aiTalkOpenRef.current) {
+        closeAiTalk();
+        return;
+      }
+      const currentState = readHistoryState(window.history.state);
+      const index = currentState?.index ?? historyIndexRef.current;
+      if (index > 0) {
+        window.history.back();
+        return;
+      }
+      navigateTo(fallbackPage, { replace: true });
+    },
+    [closeAiTalk, navigateTo]
+  );
+
+  const handleNavigate = (page: PageRoute) => {
+    navigateTo(page);
   };
+
+  const toggleAiTalk = () => {
+    if (aiTalkOpenRef.current) closeAiTalk();
+    else openAiTalk();
+  };
+
+  useEffect(() => {
+    const initialState: AppHistoryState = {
+      page: currentPageRef.current,
+      aiTalk: false,
+      index: 0,
+    };
+    window.history.replaceState(initialState, '', window.location.href);
+    historyIndexRef.current = 0;
+
+    const onPopState = (event: PopStateEvent) => {
+      const nextState = readHistoryState(event.state);
+      if (!nextState) {
+        // A foreign or malformed history entry: keep the app on a valid screen.
+        currentPageRef.current = 'home';
+        aiTalkOpenRef.current = false;
+        setCurrentPage('home');
+        setAiTalkOpen(false);
+        return;
+      }
+      historyIndexRef.current = nextState.index;
+      currentPageRef.current = nextState.page;
+      aiTalkOpenRef.current = nextState.aiTalk;
+      setCurrentPage(nextState.page);
+      setAiTalkOpen(nextState.aiTalk);
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    };
+
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Private owner entry point. No public UI element links to the admin panel:
   // it opens only from `#admin`, Ctrl+Alt+A (Cmd+Alt+A), or a long-press on the
   // app emblem in Layout, and then asks the server for the admin passcode.
   useEffect(() => {
-    const hasAdminHash = () => window.location.hash.replace('#', '').toLowerCase() === 'admin';
     const openFromHash = () => {
-      if (!hasAdminHash()) return;
-      setCurrentPage('admin');
-      window.scrollTo({ top: 0, behavior: 'auto' });
+      if (!hasAdminHash() || currentPageRef.current === 'admin') return;
+      navigateTo('admin');
     };
     const openFromShortcut = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === 'a') {
         event.preventDefault();
-        setCurrentPage('admin');
-        window.scrollTo({ top: 0, behavior: 'auto' });
+        navigateTo('admin');
       }
     };
 
@@ -134,7 +299,7 @@ export default function App() {
       window.removeEventListener('hashchange', openFromHash);
       window.removeEventListener('keydown', openFromShortcut);
     };
-  }, []);
+  }, [navigateTo]);
 
   const handleStartCounting = (dhikrId?: string) => {
     if (dhikrId) {
@@ -174,6 +339,9 @@ export default function App() {
       <Layout
         currentPage={currentPage}
         onNavigate={handleNavigate}
+        aiTalkOpen={aiTalkOpen}
+        onCloseAiTalk={closeAiTalk}
+        onToggleAiTalk={toggleAiTalk}
         language={settings.language}
         isOnline={pwa.isOnline}
         isInstallable={pwa.isInstallable}
@@ -202,6 +370,7 @@ export default function App() {
               setActiveDhikrId(id);
               setResumedSession(null);
             }}
+            onBack={() => goBack('home')}
             onNavigate={handleNavigate}
             onActiveSessionChange={setActiveSessionId}
           />
@@ -229,14 +398,14 @@ export default function App() {
               language={settings.language}
               dhikr={detailDhikr}
               isDefault={detailDhikr.id === settings.defaultDhikrId}
-              onBack={() => handleNavigate('library')}
+              onBack={() => goBack('library')}
               onStartCounting={handleStartCounting}
               onEditCustom={(item) => handleOpenCustomCreator(item)}
               onSetDefault={(id) => {
                 updateSettings({ defaultDhikrId: id });
                 setActiveDhikrId(id);
               }}
-              onDeleted={() => handleNavigate('library')}
+              onDeleted={() => goBack('library')}
             />
           )}
 
@@ -248,11 +417,11 @@ export default function App() {
               onSaved={(savedId) => {
                 setDetailDhikrId(savedId);
                 setEditingDhikr(null);
-                handleNavigate('library');
+                goBack('library');
               }}
               onCancel={() => {
                 setEditingDhikr(null);
-                handleNavigate('library');
+                goBack('library');
               }}
             />
           )}
@@ -324,7 +493,7 @@ export default function App() {
             />
           )}
 
-          {currentPage === 'admin' && <AdminPage onExit={() => handleNavigate('home')} />}
+          {currentPage === 'admin' && <AdminPage onExit={() => goBack('home')} />}
 
           {currentPage === 'backup' && (
             <BackupRestorePage settings={settings} onReplaceSettings={replaceSettings} />

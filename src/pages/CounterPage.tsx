@@ -43,6 +43,7 @@ interface CounterPageProps {
   settings: AppSettings;
   onUpdateCustomization: (patch: Partial<AppSettings['customization']>) => void;
   onSwitchDhikr: (dhikrId: string) => void;
+  onBack: () => void;
   onNavigate: (page: PageRoute) => void;
   onActiveSessionChange: (sessionId: string | null) => void;
 }
@@ -54,6 +55,7 @@ export const CounterPage: React.FC<CounterPageProps> = ({
   settings,
   onUpdateCustomization,
   onSwitchDhikr,
+  onBack,
   onNavigate,
   onActiveSessionChange,
 }) => {
@@ -321,12 +323,12 @@ export const CounterPage: React.FC<CounterPageProps> = ({
       <header className="relative z-20 w-full max-w-4xl mx-auto px-4 pt-safe py-3.5 flex items-center justify-between gap-2">
         <button
           type="button"
-          onClick={() => onNavigate('home')}
+          onClick={onBack}
           aria-label={t.common.back}
           className="h-11 px-3 inline-flex items-center gap-2 rounded-xl text-sm font-medium text-[var(--text-secondary)] hover:bg-[var(--accent-soft)] hover:text-[var(--text-primary)] cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span className="hidden sm:inline">{t.nav.home}</span>
+          <span className="hidden sm:inline">{t.common.back}</span>
         </button>
 
         <button

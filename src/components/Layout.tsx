@@ -26,6 +26,9 @@ import { AiTalkOverlay } from './AiTalkOverlay';
 interface LayoutProps {
   currentPage: PageRoute;
   onNavigate: (page: PageRoute) => void;
+  aiTalkOpen: boolean;
+  onCloseAiTalk: () => void;
+  onToggleAiTalk: () => void;
   language: Language;
   isOnline: boolean;
   isInstallable: boolean;
@@ -38,6 +41,9 @@ interface LayoutProps {
 export const Layout: React.FC<LayoutProps> = ({
   currentPage,
   onNavigate,
+  aiTalkOpen,
+  onCloseAiTalk,
+  onToggleAiTalk,
   language,
   isOnline,
   isInstallable,
@@ -47,7 +53,6 @@ export const Layout: React.FC<LayoutProps> = ({
   children,
 }) => {
   const t = getTranslations(language);
-  const [aiTalkOpen, setAiTalkOpen] = React.useState(false);
 
   // Hidden owner entry point. The emblem behaves normally on a tap; holding it
   // for a moment opens the admin panel. Nothing in the UI advertises this.
@@ -166,7 +171,7 @@ export const Layout: React.FC<LayoutProps> = ({
           <div className="space-y-2">
             <button
               type="button"
-              onClick={() => setAiTalkOpen(true)}
+              onClick={onToggleAiTalk}
               aria-haspopup="dialog"
               aria-expanded={aiTalkOpen}
               className={cn(
@@ -268,7 +273,7 @@ export const Layout: React.FC<LayoutProps> = ({
             </span>
             <button
               type="button"
-              onClick={() => setAiTalkOpen(true)}
+              onClick={onToggleAiTalk}
               aria-label={t.nav.aiTalk}
               aria-haspopup="dialog"
               aria-expanded={aiTalkOpen}
@@ -322,7 +327,7 @@ export const Layout: React.FC<LayoutProps> = ({
 
       <AiTalkOverlay
         open={aiTalkOpen}
-        onClose={() => setAiTalkOpen(false)}
+        onClose={onCloseAiTalk}
         language={language}
       />
     </div>
