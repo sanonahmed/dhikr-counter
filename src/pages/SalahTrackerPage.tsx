@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { CalendarDays, Check, ChevronLeft, ChevronRight, Info, Shield, X } from 'lucide-react';
+import { CalendarDays, Check, ChevronLeft, ChevronRight, Info, MoonStar, Shield, X } from 'lucide-react';
 import type { Language, SalahDay, SalahPrayer, SalahPrayerStatuses, SalahStatus } from '../types/dhikr';
 import { db } from '../db/database';
 import { getTranslations } from '../i18n/translations';
 import { addDays, formatGregorianDate, fromLocalDayKey, toLocalDayKey } from '../utils/dateUtils';
 import { Button, Card, Input } from '../components/ui/Primitives';
 import { cn } from '../utils/cn';
+import { SalahLifetimePanel } from './SalahLifetimePanel';
 
 const PRAYERS: SalahPrayer[] = ['fajr', 'dhuhr', 'asr', 'maghrib', 'isha'];
 const OPTIONS: SalahStatus[] = ['prayed', 'missed', 'excused'];
@@ -45,6 +46,7 @@ export const SalahTrackerPage: React.FC<SalahTrackerPageProps> = ({ language, sa
   const prayedCount = PRAYERS.filter((prayer) => statuses[prayer] === 'prayed').length;
   const historyKeys = Array.from({ length: 7 }, (_, i) => addDays(todayKey, i - 6));
   const completeDays = historyKeys.filter((key) => PRAYERS.every((prayer) => getStatuses(daysByKey.get(key))[prayer] === 'prayed')).length;
+  const recordedToday = PRAYERS.filter((prayer) => statuses[prayer] !== undefined).length;
 
   const changeStatus = async (prayer: SalahPrayer, status: SalahStatus) => {
     if (savingPrayer) return;
@@ -66,17 +68,22 @@ export const SalahTrackerPage: React.FC<SalahTrackerPageProps> = ({ language, sa
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
-        <div>
-          <h1 className="font-display text-3xl font-bold text-[var(--text-primary)]">{t.salah.title}</h1>
-          <p className="text-sm text-[var(--text-secondary)] mt-1">{t.salah.subtitle}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+      <div className="relative overflow-hidden rounded-[1.5rem] border border-[var(--border-subtle)] bg-[var(--bg-surface)] px-5 py-5 shadow-[var(--shadow-card)] sm:px-7 sm:py-6">
+        <span aria-hidden="true" className="pointer-events-none absolute -right-8 -top-16 h-48 w-48 rounded-full border border-[var(--accent-gold)]/15" /><span aria-hidden="true" className="pointer-events-none absolute -right-1 -top-9 h-32 w-32 rounded-full border border-dashed border-[var(--accent-primary)]/15" />
+        <div className="relative flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+          <div>
+            <span className="mb-3 inline-flex items-center gap-2 rounded-full border border-[var(--accent-gold)]/25 bg-[var(--accent-gold-soft)] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[.17em] text-[var(--accent-gold)]"><MoonStar className="h-3.5 w-3.5" aria-hidden="true" />{t.salah.lifetimePrivate}</span>
+            <h1 className="font-display text-3xl font-semibold tracking-tight text-[var(--text-primary)] sm:text-4xl">{t.salah.title}</h1>
+            <p className="mt-1.5 text-sm text-[var(--text-secondary)]">{t.salah.subtitle}</p>
+          </div>
+          <div className="relative flex flex-wrap items-center gap-2">
+            <span className="hidden items-center gap-1.5 rounded-full bg-[var(--accent-soft)] px-3 py-2 text-[11px] font-medium text-[var(--accent-primary)] sm:inline-flex"><Check className="h-3.5 w-3.5" />{recordedToday}/5 {t.salah.prayersMarked}</span>
           <Button variant="outline" size="icon" onClick={() => setSelectedDay(addDays(selectedDay, -1))} aria-label={t.salah.previousDay}><ChevronLeft className="w-4 h-4" /></Button>
           <Input type="date" value={selectedDay} max={todayKey} aria-label={t.salah.pickDate} onChange={(e) => { if (e.target.value && e.target.value <= todayKey) setSelectedDay(e.target.value); }} className="w-[148px]" />
           <Button variant="outline" size="icon" onClick={() => setSelectedDay(addDays(selectedDay, 1))} disabled={selectedDay >= todayKey} aria-label={t.salah.nextDay}><ChevronRight className="w-4 h-4" /></Button>
           {selectedDay !== todayKey && <Button variant="ghost" size="sm" onClick={() => setSelectedDay(todayKey)}>{t.salah.today}</Button>}
         </div>
+      </div>
       </div>
       {error && <div role="alert" className="rounded-xl bg-red-500/10 border border-red-500/30 px-4 py-3 text-sm text-red-600">{error}</div>}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
@@ -137,6 +144,7 @@ export const SalahTrackerPage: React.FC<SalahTrackerPageProps> = ({ language, sa
           <div className="pt-3 border-t border-[var(--border-subtle)]"><p className="text-xs text-[var(--text-muted)]">{completeDays}/7 {t.salah.daysComplete}</p></div>
         </Card>
       </div>
+      <SalahLifetimePanel language={language} salahDays={salahDays} selectedDay={selectedDay} onSelectDay={setSelectedDay} />
       <p className="text-xs text-[var(--text-muted)] flex items-start gap-2 leading-relaxed"><Info className="w-4 h-4 shrink-0 mt-0.5" aria-hidden="true" /><span>{t.salah.personalNote}</span></p>
     </div>
   );
