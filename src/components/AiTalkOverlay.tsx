@@ -5,6 +5,7 @@ import { getTranslations } from '../i18n/translations';
 import { resolveAdminServerUrl } from '../utils/adminSession';
 import { cn } from '../utils/cn';
 import { toPlainText } from '../../shared/plainText.js';
+import { AiTalkOrb } from './AiTalkOrb';
 
 interface AiTalkOverlayProps { open: boolean; onClose: () => void; language: Language; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; id: number; }
@@ -353,6 +354,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   };
 
   const visibleTranscript = [pendingText, interim].filter(Boolean).join(' ');
+  const orbMode = busy ? 'thinking' : listening ? 'listening' : speakingId !== null ? 'speaking' : 'idle';
   const statusText = busy
     ? t.thinking
     : listening
@@ -377,8 +379,17 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
       >
         <div className="ai-talk-pattern pointer-events-none absolute inset-0 opacity-80" aria-hidden="true" />
         <header className="relative z-10 flex min-h-[76px] items-center gap-3 border-b border-white/[0.08] px-4 sm:px-7">
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#d4a853]/30 bg-[#d4a853]/[0.08] text-[#e0bd70]">
+          <span className="relative flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-[#d4a853]/30 bg-[#d4a853]/[0.08] text-[#e0bd70]">
             <SacredMark className="h-6 w-6" />
+            {orbMode !== 'idle' && (
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full border-2 border-[#08130f] animate-pulse',
+                  orbMode === 'thinking' ? 'bg-amber-300' : orbMode === 'speaking' ? 'bg-sky-300' : 'bg-emerald-300',
+                )}
+              />
+            )}
           </span>
           <h2 id="ai-talk-title" className="min-w-0 flex-1 font-display text-xl font-semibold tracking-wide text-[#f5f0df]">{t.title}</h2>
           <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.035] px-3 py-1.5 text-xs text-[#b6c1b9]">
@@ -406,11 +417,9 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
         <div ref={listRef} className="relative z-10 flex-1 space-y-5 overflow-y-auto px-4 py-5 sm:px-8 sm:py-7" aria-live="polite" aria-relevant="additions text">
           {messages.length === 0 && (
             <div className="flex h-full min-h-[250px] flex-col items-center justify-center pb-4 text-center">
-              <div className="relative mb-7 flex h-36 w-36 items-center justify-center sm:h-44 sm:w-44">
-                <span className="ai-talk-rotate absolute inset-0 rounded-full border border-dashed border-[#d4a853]/25" aria-hidden="true" />
-                <span className="absolute inset-[13px] rounded-full border border-[#d4a853]/20" aria-hidden="true" />
-                <span className="absolute inset-[25px] rounded-full bg-[radial-gradient(circle,rgba(212,168,83,0.14),rgba(9,33,24,0.2)_68%,transparent_70%)]" aria-hidden="true" />
-                <SacredMark className="relative h-12 w-12 text-[#d7b76d] sm:h-14 sm:w-14" />
+              <div className="relative mb-6 flex h-52 w-52 items-center justify-center sm:h-64 sm:w-64">
+                <AiTalkOrb mode={orbMode} className="absolute inset-0" />
+                <SacredMark className="pointer-events-none relative h-9 w-9 text-[#e7cb82]/90 drop-shadow-[0_0_14px_rgba(226,194,111,0.55)] sm:h-11 sm:w-11" />
               </div>
               <span className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#d4a853]/20 bg-[#d4a853]/[0.06] px-3 py-1.5 text-[10px] font-medium uppercase tracking-[0.22em] text-[#d4bc83]">
                 <span className={cn('h-1.5 w-1.5 rounded-full', listening ? 'animate-pulse bg-emerald-400' : 'bg-[#d4a853]')} />

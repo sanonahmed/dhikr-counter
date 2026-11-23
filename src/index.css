@@ -247,6 +247,32 @@ body {
   }
 }
 
+
+.ai-talk-orb {
+  isolation: isolate;
+  filter: drop-shadow(0 0 36px rgba(20, 142, 96, 0.2));
+}
+
+.ai-talk-orb canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.ai-talk-orb-halo {
+  background: radial-gradient(circle, rgba(24, 123, 83, 0.22), rgba(7, 22, 16, 0.04) 58%, transparent 74%);
+  filter: blur(9px);
+  transform: scale(1.3);
+}
+
+.ai-talk-orb-fallback {
+  background:
+    radial-gradient(circle at 34% 28%, rgba(219, 190, 115, 0.72), transparent 5%),
+    radial-gradient(circle at 38% 34%, #318361 0, #15533b 34%, #09251a 68%, transparent 70%);
+  box-shadow: inset -16px -18px 35px rgba(0, 0, 0, 0.58), 0 0 48px rgba(31, 162, 108, 0.18);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ai-talk-breathe,
   .ai-talk-breathe-fast,
