@@ -19,16 +19,60 @@ const ENV_PROXY_URL =
     ? import.meta.env.VITE_AI_PROXY_URL.trim()
     : '';
 
+const ADMIN_SERVER_STORAGE_KEY = 'dhikr-counter-admin-server-v1';
+
 let cachedToken: string | null = null;
 
-/**
- * Root URL of the Node service that answers the admin API. An empty string
- * means "same origin" (the normal deployment and local `npm run dev`).
- */
-export function resolveAdminServerUrl(): string {
-  return ENV_PROXY_URL
+/** Accepts a full URL, a URL ending in /api or /api/ai/chat, or an empty string. */
+function normalizeServerUrl(value: string): string {
+  return String(value || '')
+    .trim()
     .replace(/\/+$/, '')
     .replace(/\/api(\/ai\/chat)?$/i, '');
+}
+
+/**
+ * Owner-supplied admin server, saved on this device from the lock screen. It lets
+ * a static deployment talk to a Node copy of the app without rebuilding.
+ */
+export function getAdminServerOverride(): string {
+  try {
+    return normalizeServerUrl(localStorage.getItem(ADMIN_SERVER_STORAGE_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
+/** Saves (or clears, with an empty string) the override and drops the old token. */
+export function setAdminServerOverride(rawUrl: string): void {
+  const normalized = normalizeServerUrl(rawUrl);
+  const withScheme =
+    normalized && !/^https?:\/\//i.test(normalized) ? `https://${normalized}` : normalized;
+
+  if (withScheme && !/^https?:\/\/[^\s/]+(\/.*)?$/i.test(withScheme)) {
+    throw new Error('Enter a full URL, for example https://your-node-service.onrender.com.');
+  }
+
+  try {
+    if (withScheme) {
+      localStorage.setItem(ADMIN_SERVER_STORAGE_KEY, withScheme);
+    } else {
+      localStorage.removeItem(ADMIN_SERVER_STORAGE_KEY);
+    }
+  } catch {
+    throw new Error('This browser blocked local storage, so the server address could not be saved.');
+  }
+
+  // A token issued by another server is meaningless, and must never be sent there.
+  clearAdminToken();
+}
+
+/**
+ * Root URL of the Node service that answers the admin API. An empty string means
+ * "same origin" (the normal deployment and local `npm run dev`).
+ */
+export function resolveAdminServerUrl(): string {
+  return getAdminServerOverride() || normalizeServerUrl(ENV_PROXY_URL);
 }
 
 export function getAdminToken(): string {

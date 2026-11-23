@@ -7,6 +7,7 @@ import {
   loginAdmin,
   logoutAdmin,
   resolveAdminServerUrl,
+  setAdminServerOverride,
   type AdminSessionInfo,
 } from '../utils/adminSession';
 
@@ -30,6 +31,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onExit }) => {
   const [passcode, setPasscode] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [serverUrl, setServerUrl] = useState(() => resolveAdminServerUrl());
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     const info = await checkAdminSession();
@@ -66,6 +70,39 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onExit }) => {
     setPasscode('');
     setError(null);
     setSession({ enabled: session?.enabled ?? true, authenticated: false, reachable: true });
+  };
+
+  /** Re-points the panel at another Node server (e.g. a static host + separate API). */
+  const saveServer = async (value: string) => {
+    if (serverBusy) return;
+
+    setServerBusy(true);
+    setServerError(null);
+    try {
+      setAdminServerOverride(value);
+    } catch (saveError) {
+      setServerError(
+        saveError instanceof Error ? saveError.message : 'That server address could not be saved.',
+      );
+      setServerBusy(false);
+      return;
+    }
+
+    setError(null);
+    setSession(null);
+    setServerUrl(resolveAdminServerUrl());
+    const info = await refresh();
+    if (!info.reachable) {
+      setServerError(
+        `${serverLabel()} did not answer the admin API. Check the address, and that the server sets ADMIN_PASSCODE.`,
+      );
+    }
+    setServerBusy(false);
+  };
+
+  const applyServer = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    void saveServer(serverUrl);
   };
 
   if (!session) {
@@ -158,9 +195,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onExit }) => {
 
         {!session.reachable && (
           <p className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]">
-            Could not reach the app server at <strong className="text-[var(--text-primary)]">{serverLabel()}</strong>. Admin access needs the Node
-            server: run <code>npm run dev</code> or <code>npm start</code>, and point <code>VITE_AI_PROXY_URL</code> at it when the app is hosted
-            separately.
+            Could not reach the app server at <strong className="text-[var(--text-primary)]">{serverLabel()}</strong>. It
+            answered without JSON, which usually means a static host is returning this page&apos;s HTML for{' '}
+            <code>/api/*</code>. Run the app through <code>server.js</code> (<code>npm run dev</code> or{' '}
+            <code>npm start</code>), or set the Node server address below.
           </p>
         )}
 
@@ -169,6 +207,53 @@ export const AdminPage: React.FC<AdminPageProps> = ({ onExit }) => {
             Admin access is disabled on the server. Add <code>ADMIN_PASSCODE</code> to its environment and restart it.
           </p>
         )}
+
+        <details className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-surface-muted)] p-3">
+          <summary className="cursor-pointer select-none text-xs font-semibold text-[var(--text-primary)]">
+            Admin server
+          </summary>
+          <div className="mt-3 space-y-2.5">
+            <p className="text-[11px] leading-relaxed text-[var(--text-secondary)]">
+              The panel only talks to a Node server running <code>server.js</code>. Leave this empty when that server
+              also serves the app; otherwise enter its address (it must allow this site through{' '}
+              <code>AI_PROXY_ORIGINS</code>).
+            </p>
+            <form onSubmit={applyServer} className="space-y-2">
+              <Input
+                type="url"
+                value={serverUrl}
+                onChange={(event) => setServerUrl(event.target.value)}
+                placeholder="https://your-node-service.onrender.com"
+                autoComplete="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                inputMode="url"
+                disabled={serverBusy}
+                aria-label="Admin server address"
+              />
+              <div className="flex gap-2">
+                <Button type="submit" variant="outline" size="sm" disabled={serverBusy}>
+                  {serverBusy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+                  Save &amp; retry
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={serverBusy}
+                  onClick={() => void saveServer('')}
+                >
+                  Use default
+                </Button>
+              </div>
+            </form>
+            {serverError && (
+              <p role="alert" className="text-[11px] leading-relaxed text-red-700 dark:text-red-300">
+                {serverError}
+              </p>
+            )}
+          </div>
+        </details>
 
         <Button variant="ghost" size="sm" className="w-full" onClick={onExit}>
           <ArrowLeft className="h-4 w-4" />
