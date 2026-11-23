@@ -44,10 +44,11 @@ An offline-first, modern Progressive Web App (PWA) for Islamic Dhikr, Durood, Is
    cp .env.example .env.local
    ```
 
-4. Start the development server:
+4. Start the development servers:
    ```bash
    npm run dev
    ```
+   This runs Vite on port 3000 **and** `server.js` on port 8787, so `/api/ai/*` is proxied exactly like the deployed app. To run them separately, use `npm run dev:web` (Vite) and `npm run dev:server` (proxy) in two terminals.
 
 5. Build for production:
    ```bash
@@ -86,11 +87,19 @@ Only the provider host named in `AI_BASE_URL` (plus a built-in list of common AI
 ### Development
 
 ```bash
-npm run dev          # Vite on :3000, /api proxied to :8787
-npm run dev:server   # server.js on :8787 (separate terminal)
+npm run dev          # Vite on :3000 + server.js on :8787 (one command)
+npm run dev:web      # Vite only, /api still proxied to :8787
+npm run dev:server   # server.js only (second terminal)
 ```
 
-Then verify the proxy with `npm run test:proxy`.
+Starting only Vite leaves `/api` without a backend, so AI requests fall back to
+direct browser calls and providers such as OpenAI reject them with a CORS error.
+Start server.js too (`npm run dev` does both), then verify with `npm run test:proxy`.
+
+> **"No app server answered /api/ai/chat" (CORS error in the AI studio)?** The
+> proxy was not running. Use `npm run dev` locally or `npm start` in production,
+> and make sure the app is opened on port 3000 during development — keys are
+> stored per origin, so a different port or host starts with empty settings.
 
 ---
 

@@ -130,6 +130,6 @@ export const AdminNotificationsPage: React.FC = () => {
     {notice && <p role="status" className={`rounded-xl border p-3 text-sm ${notice.error ? 'border-red-500/30 text-red-700 dark:text-red-300' : 'border-[var(--accent-primary)]/25 text-[var(--accent-primary)]'}`}>{notice.text}</p>}
     <p className="text-xs leading-relaxed text-[var(--text-muted)]">{proxy?.available
       ? `Requests go through this app's server (proxy ready${proxy.serverKeyConfigured ? ', server key configured' : ''}), so the provider's browser (CORS) policy does not matter.`
-      : 'This deployment is static, so requests go directly from your browser and the provider must allow browser (CORS) requests. Google Gemini and OpenRouter do; OpenAI needs the bundled server (npm start) to proxy requests.'} Enter the base URL only (for example, https://api.openai.com/v1); /chat/completions is added automatically. Device notifications need permission and typically HTTPS; this tool cannot notify other users or deliver while the app is closed.</p>
+      : 'The AI proxy is not reachable, so requests go directly from your browser and the provider must allow browser (CORS) requests. Google Gemini and OpenRouter do; OpenAI needs the bundled server — run "npm run dev" locally or "npm start" in production.'} Enter the base URL only (for example, https://api.openai.com/v1); /chat/completions is added automatically. Device notifications need permission and typically HTTPS; this tool cannot notify other users or deliver while the app is closed.</p>
   </div>;
 };

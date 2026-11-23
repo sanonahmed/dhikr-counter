@@ -298,8 +298,20 @@ app.use((error, _req, res, _next) => {
   res.status(500).json({ error: 'Unexpected server error.' });
 });
 
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   const { key, baseUrl, model } = providerDefaults();
   console.log(`Dhikr Counter server listening on http://localhost:${PORT}`);
   console.log(`AI proxy: ${baseUrl} (model: ${model}) - server key ${key ? 'configured' : 'not configured'}`);
+});
+
+// Without this handler a busy port crashes the process with a stack trace.
+server.on('error', (error) => {
+  if (error?.code === 'EADDRINUSE') {
+    console.error(
+      `Port ${PORT} is already in use. Stop the process using it, or start with a different port (for example PORT=8788 npm start).`
+    );
+  } else {
+    console.error(`Could not start the server: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  process.exit(1);
 });

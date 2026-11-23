@@ -158,6 +158,18 @@ export function usesServerKey(config: AiProviderConfig, proxy: AiProxyStatus | n
 
 
 /**
+ * A 5xx without JSON means /api exists but its backend is down, which is what
+ * Vite returns when server.js is not running. Report that instead of falling
+ * back to a browser call the provider will block with a vague CORS error.
+ */
+function proxyDownMessage(status: number): string {
+  return (
+    `The app server answered ${AI_PROXY_ENDPOINT} with HTTP ${status} instead of JSON, so the AI proxy is not running. ` +
+    'Start it with "npm run dev" (development) or "npm start" (production), then try again.'
+  );
+}
+
+/**
  * Sends the request through server.js. Returns null when no proxy is
  * deployed (static hosting), so the caller can fall back to a direct call.
  */
@@ -180,8 +192,12 @@ async function requestViaProxy(config: AiProviderConfig, prompt: string, maxToke
   }
 
   const data = await readJson(response);
-  // Static hosts answer unknown routes with index.html, which is not JSON.
-  if (!data) return null;
+  // Static hosts rewrite unknown routes to index.html (HTML, not JSON). A 5xx
+  // without JSON instead means a proxy is wired up but its backend is down.
+  if (!data) {
+    if (response.status >= 500) throw new Error(proxyDownMessage(response.status));
+    return null;
+  }
 
   const message = typeof data.error === 'string' ? data.error : '';
   if (!response.ok) {
@@ -214,8 +230,9 @@ async function requestDirect(config: AiProviderConfig, prompt: string, maxTokens
   } catch (error) {
     if (error instanceof TypeError) {
       throw new Error(
-        'The browser could not reach the provider, usually because it blocks cross-origin (CORS) requests. ' +
-          'Use a provider that allows browser requests, or run/deploy this app as a Node service (npm start) so requests go through the bundled proxy.'
+        'No app server answered /api/ai/chat, so the browser called the provider directly and the provider blocked it ' +
+          'with cross-origin (CORS) rules. Start the bundled server with "npm run dev" (development) or "npm start" ' +
+          '(production) to relay the request, or use a provider that allows browser requests, such as Google Gemini or OpenRouter.'
       );
     }
     throw error;
