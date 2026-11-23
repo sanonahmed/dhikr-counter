@@ -381,19 +381,27 @@ try {
   check('empty prompt rejected', emptyPrompt.status === 400, `${emptyPrompt.status} ${(await emptyPrompt.json()).error}`);
 
   // Locking out is per client IP, so it runs after every authenticated check.
-  let talkLimited;
-  for (let attempt = 0; attempt < 8; attempt += 1) {
-    talkLimited = await fetch(`${base}/api/ai/talk`, {
+  let talkWithinLimit = true;
+  for (let attempt = 0; attempt < 199; attempt += 1) {
+    const response = await fetch(`${base}/api/ai/talk`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ messages: [{ role: 'user', content: `Rate limit check ${attempt}` }] }),
     });
-    if (talkLimited.status === 429) break;
+    if (!response.ok) {
+      talkWithinLimit = false;
+      break;
+    }
   }
+  const talkLimited = await fetch(`${base}/api/ai/talk`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'Rate limit exceeded' }] }),
+  });
   const talkLimitData = await talkLimited.json();
   check(
-    'public AI Talk requests are rate-limited per IP',
-    talkLimited.status === 429 && talkLimitData.code === 'rate_limited' && talkLimited.headers.has('retry-after'),
+    'public AI Talk allows 200 requests per IP before limiting the next request',
+    talkWithinLimit && talkLimited.status === 429 && talkLimitData.code === 'rate_limited' && talkLimited.headers.has('retry-after'),
     `${talkLimited.status} ${JSON.stringify(talkLimitData)}`
   );
 

@@ -10,7 +10,7 @@
     "build": "vite build",
     "start": "node server.js",
     "serve": "npm run build && node server.js",
-    "test": "tsx --test src/utils/logic.test.ts src/utils/aiDraft.test.ts shared/plainText.test.js server/push/push.test.js",
+    "test": "tsx --test src/utils/logic.test.ts src/utils/aiDraft.test.ts src/utils/speechTranscript.test.ts shared/plainText.test.js server/push/push.test.js",
     "test:proxy": "node scripts/test-ai-proxy.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist dev-dist",

@@ -6,11 +6,11 @@ import { resolveAdminServerUrl } from '../utils/adminSession';
 import { cn } from '../utils/cn';
 import { toPlainText } from '../../shared/plainText.js';
 import { AiTalkOrb } from './AiTalkOrb';
+import { splitSpeechRecognitionResults, type SpeechRecognitionResultLike } from '../utils/speechTranscript';
 
 interface AiTalkOverlayProps { open: boolean; onClose: () => void; language: Language; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; id: number; }
-interface SpeechRecognitionResultLike { transcript: string; isFinal?: boolean; }
-interface SpeechRecognitionEventLike { resultIndex?: number; results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>; }
+interface SpeechRecognitionEventLike { resultIndex?: number; results: ArrayLike<SpeechRecognitionResultLike>; }
 interface SpeechRecognitionErrorLike { error: string; }
 interface SpeechRecognitionLike {
   lang: string; interimResults: boolean; maxAlternatives: number; continuous: boolean;
@@ -157,7 +157,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     if (transcriptTimerRef.current !== null) window.clearTimeout(transcriptTimerRef.current);
     transcriptTimerRef.current = null;
     if (!autoListenRef.current || busyRef.current) return;
-    const content = [pendingFinalTranscriptRef.current, interimTranscriptRef.current].filter(Boolean).join(' ').trim();
+    const content = pendingFinalTranscriptRef.current.trim();
     pendingFinalTranscriptRef.current = '';
     interimTranscriptRef.current = '';
     setPendingText('');
@@ -184,20 +184,14 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
       recognition.maxAlternatives = 1;
       recognition.continuous = true;
       recognition.onresult = (event) => {
-        let latestInterim = '';
-        for (let index = event.resultIndex ?? 0; index < event.results.length; index += 1) {
-          const result = event.results[index];
-          const transcript = result?.[0]?.transcript?.trim();
-          if (!transcript) continue;
-          if (result[0].isFinal === false) latestInterim += `${transcript} `;
-          else pendingFinalTranscriptRef.current += `${transcript} `;
-        }
-        interimTranscriptRef.current = latestInterim.trim();
+        const transcripts = splitSpeechRecognitionResults(event.results, event.resultIndex ?? 0);
+        if (transcripts.finalTranscript) pendingFinalTranscriptRef.current += `${transcripts.finalTranscript} `;
+        interimTranscriptRef.current = transcripts.interimTranscript;
         setInterim(interimTranscriptRef.current);
         setPendingText(pendingFinalTranscriptRef.current.trim());
 
         if (transcriptTimerRef.current !== null) window.clearTimeout(transcriptTimerRef.current);
-        if (pendingFinalTranscriptRef.current.trim() || interimTranscriptRef.current) {
+        if (pendingFinalTranscriptRef.current.trim()) {
           transcriptTimerRef.current = window.setTimeout(() => submitTranscriptRef.current(), endOfSpeechDelay);
         }
       };
@@ -217,13 +211,17 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
         if (recognitionRef.current !== recognition) return;
         recognitionRef.current = null;
         setListening(false);
-        // Keep the transcript visible while the silence timer decides when the user is done.
-        if ((pendingFinalTranscriptRef.current.trim() || interimTranscriptRef.current) && transcriptTimerRef.current === null) {
+        // Interim recognition can contain noise; only retain final results and send those after silence.
+        interimTranscriptRef.current = '';
+        setInterim('');
+        if (pendingFinalTranscriptRef.current.trim() && transcriptTimerRef.current === null) {
           transcriptTimerRef.current = window.setTimeout(() => submitTranscriptRef.current(), endOfSpeechDelay);
         }
         scheduleAutoListen();
       };
       recognitionRef.current = recognition;
+      interimTranscriptRef.current = '';
+      setInterim('');
       setListening(true);
       recognition.start();
     } catch {
