@@ -34,6 +34,9 @@ const child = spawn(process.execPath, ['server.js'], {
     AI_MODEL: 'mock-model',
     AI_ALLOWED_HOSTS: 'api.allowed.example',
     AI_PROXY_ORIGINS: 'https://frontend.example',
+    // The AI relay is private, so the test signs in like the admin panel does.
+    ADMIN_PASSCODE: 'test-passcode',
+    ADMIN_SESSION_HOURS: '1',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -53,6 +56,16 @@ async function waitForServer() {
   throw new Error(`server did not start\n${logs}`);
 }
 
+let adminToken = '';
+/** Auth header the admin panel sends; empty until the login checks run. */
+function adminHeaders(extra = {}) {
+  return {
+    'Content-Type': 'application/json',
+    ...(adminToken ? { Authorization: `Bearer ${adminToken}` } : {}),
+    ...extra,
+  };
+}
+
 const results = [];
 function check(name, ok, detail) {
   results.push({ name, ok, detail });
@@ -64,12 +77,56 @@ try {
 
   const health = await fetch(`${base}/api/health`).then((r) => r.json());
   check('health reports server key', health.ok === true && health.ai.serverKeyConfigured === true, JSON.stringify(health.ai));
+  check('health reports admin enabled', health.admin?.enabled === true, JSON.stringify(health.admin));
+
+  const anonymous = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: 'Hi' }),
+  });
+  const anonymousData = await anonymous.json();
+  check(
+    'AI proxy refuses requests without an admin session',
+    anonymous.status === 401 && anonymousData.code === 'admin_required',
+    `${anonymous.status} ${JSON.stringify(anonymousData)}`
+  );
+
+  const wrongPasscode = await fetch(`${base}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ passcode: 'not-the-passcode' }),
+  });
+  check('admin login rejects a wrong passcode', wrongPasscode.status === 401, `${wrongPasscode.status}`);
+
+  const login = await fetch(`${base}/api/admin/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ passcode: 'test-passcode' }),
+  });
+  const loginData = await login.json();
+  adminToken = typeof loginData.token === 'string' ? loginData.token : '';
+  check(
+    'admin login issues a session token',
+    login.status === 200 && adminToken.length >= 32 && loginData.expiresAt > Date.now(),
+    `${login.status} ${JSON.stringify({ ...loginData, token: adminToken ? '***' : '' })}`
+  );
+
+  const sessionInfo = await fetch(`${base}/api/admin/session`, {
+    headers: adminHeaders(),
+  }).then((r) => r.json());
+  check('admin session is recognised', sessionInfo.enabled === true && sessionInfo.authenticated === true, JSON.stringify(sessionInfo));
 
   const corsPreflight = await fetch(`${base}/api/ai/chat`, {
     method: 'OPTIONS',
-    headers: { Origin: 'https://frontend.example', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' },
+    headers: { Origin: 'https://frontend.example', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type,authorization' },
   });
-  check('allowed static origin gets CORS preflight', corsPreflight.status === 204 && corsPreflight.headers.get('access-control-allow-origin') === 'https://frontend.example');
+  const allowedHeaders = (corsPreflight.headers.get('access-control-allow-headers') || '').toLowerCase();
+  check(
+    'allowed static origin gets CORS preflight (incl. Authorization)',
+    corsPreflight.status === 204 &&
+      corsPreflight.headers.get('access-control-allow-origin') === 'https://frontend.example' &&
+      allowedHeaders.includes('authorization')
+  );
 
   const unlistedPreflight = await fetch(`${base}/api/ai/chat`, {
     method: 'OPTIONS',
@@ -79,7 +136,7 @@ try {
 
   const crossOriginProxied = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { Origin: 'https://frontend.example', 'Content-Type': 'application/json' },
+    headers: adminHeaders({ Origin: 'https://frontend.example' }),
     body: JSON.stringify({ prompt: 'Hi' }),
   });
   const crossOriginData = await crossOriginProxied.json();
@@ -87,35 +144,35 @@ try {
 
   const defaultsOnly = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: adminHeaders(),
     body: JSON.stringify({ prompt: 'Hi' }),
   }).then((r) => r.json());
   check('server defaults + server key used', defaultsOnly.content === 'Mock reply for model mock-model', JSON.stringify(defaultsOnly));
 
   const proxied = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: adminHeaders(),
     body: JSON.stringify({ baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'test-key', model: 'mock-model', prompt: 'Hi', maxTokens: 20 }),
   }).then((r) => r.json());
   check('proxy completion', proxied.content === 'Mock reply for model mock-model', JSON.stringify(proxied));
 
   const badKey = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: adminHeaders(),
     body: JSON.stringify({ baseUrl: `http://127.0.0.1:${providerPort}/v1`, apiKey: 'wrong', model: 'mock-model', prompt: 'Hi' }),
   });
   check('upstream auth error surfaced', badKey.status === 502, `${badKey.status} ${(await badKey.json()).error}`);
 
   const nonHttps = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: adminHeaders(),
     body: JSON.stringify({ baseUrl: 'http://example.com/v1', apiKey: 'k', model: 'm', prompt: 'Hi' }),
   });
   check('non-https rejected', nonHttps.status === 400, `${nonHttps.status} ${(await nonHttps.json()).error}`);
 
   const blockedHost = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: adminHeaders(),
     body: JSON.stringify({ baseUrl: 'https://api.custom-llm.example/v1', apiKey: 'k', model: 'm', prompt: 'Hi' }),
   });
   const blockedData = await blockedHost.json();
@@ -129,7 +186,7 @@ try {
   // layer, which proves AI_ALLOWED_HOSTS is what admits a custom provider.
   const allowlistedHost = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: adminHeaders(),
     body: JSON.stringify({ baseUrl: 'https://api.allowed.example/v1', apiKey: 'k', model: 'm', prompt: 'Hi' }),
   });
   const allowlistedData = await allowlistedHost.json();
@@ -141,10 +198,42 @@ try {
 
   const emptyPrompt = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: adminHeaders(),
     body: JSON.stringify({ baseUrl: 'https://api.openai.com/v1', model: 'm' }),
   });
   check('empty prompt rejected', emptyPrompt.status === 400, `${emptyPrompt.status} ${(await emptyPrompt.json()).error}`);
+
+  // Locking out is per client IP, so it runs after every authenticated check.
+  const logout = await fetch(`${base}/api/admin/logout`, {
+    method: 'POST',
+    headers: adminHeaders(),
+  });
+  const afterLogout = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: adminHeaders(),
+    body: JSON.stringify({ prompt: 'Hi' }),
+  });
+  check(
+    'logout invalidates the session',
+    logout.status === 200 && afterLogout.status === 401,
+    `${logout.status} then ${afterLogout.status}`
+  );
+
+  let limited;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    limited = await fetch(`${base}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ passcode: 'still-wrong' }),
+    });
+    if (limited.status === 429) break;
+  }
+  const limitedData = await limited.json();
+  check(
+    'repeated wrong passcodes are rate-limited',
+    limited.status === 429 && limitedData.code === 'admin_locked_out' && limited.headers.has('retry-after'),
+    `${limited.status} ${JSON.stringify(limitedData)}`
+  );
 
   const unknownApi = await fetch(`${base}/api/unknown`);
   check('unknown API is JSON 404', unknownApi.status === 404 && (unknownApi.headers.get('content-type') || '').includes('json'));

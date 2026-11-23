@@ -179,7 +179,7 @@ export const AdminNotificationsPage: React.FC = () => {
         {BUILD_TIME_PROXY_URL && <p>This build already defaults to <code className="rounded bg-[var(--bg-surface-muted)] px-1">{BUILD_TIME_PROXY_URL}</code>; open that URL once if the free service is asleep.</p>}
       </div>}
       <div className="flex flex-wrap gap-2"><Button onClick={save}><CheckCircle2 className="h-4 w-4" />Save on device</Button><Button variant="outline" disabled={busy !== null || !canRequest} onClick={() => void providerAction('test')}>{busy === 'test' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PlugZap className="h-4 w-4" />}Test provider</Button><Button variant="ghost" onClick={clear}><Trash2 className="h-4 w-4" />Clear key</Button></div>
-      <div className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><p>This is not a secured admin login. Your key is stored in this browser and may be accessible to other users of this device. For shared administration, use a secured backend; never expose a private key in a public app.</p></div>
+      <div className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><p>Restricted area: the app server verifies your admin passcode before it relays any request, so the server key stays private. The provider key you enter here is still stored in this browser only — use a private device and press <strong className="text-[var(--text-primary)]">Clear key</strong> before leaving a shared one.</p></div>
     </Card>
 
 

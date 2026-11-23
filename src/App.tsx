@@ -40,9 +40,7 @@ const BackupRestorePage = lazy(() =>
 const AboutPrivacyPage = lazy(() =>
   import('./pages/AboutPrivacyPage').then((m) => ({ default: m.AboutPrivacyPage }))
 );
-const AdminNotificationsPage = lazy(() =>
-  import('./pages/AdminNotificationsPage').then((m) => ({ default: m.AdminNotificationsPage }))
-);
+const AdminPage = lazy(() => import('./pages/AdminPage').then((m) => ({ default: m.AdminPage })));
 
 function PageLoader() {
   return (
@@ -100,7 +98,38 @@ export default function App() {
   const handleNavigate = (page: PageRoute) => {
     setCurrentPage(page);
     window.scrollTo({ top: 0, behavior: 'auto' });
+    // Drop the hidden `#admin` deep link once the owner leaves the panel.
+    if (page !== 'admin' && window.location.hash.replace('#', '').toLowerCase() === 'admin') {
+      window.history.replaceState(null, '', `${window.location.pathname}${window.location.search}`);
+    }
   };
+
+  // Private owner entry point. No public UI element links to the admin panel:
+  // it opens only from `#admin`, Ctrl+Alt+A (Cmd+Alt+A), or a long-press on the
+  // app emblem in Layout, and then asks the server for the admin passcode.
+  useEffect(() => {
+    const hasAdminHash = () => window.location.hash.replace('#', '').toLowerCase() === 'admin';
+    const openFromHash = () => {
+      if (!hasAdminHash()) return;
+      setCurrentPage('admin');
+      window.scrollTo({ top: 0, behavior: 'auto' });
+    };
+    const openFromShortcut = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.altKey && event.key.toLowerCase() === 'a') {
+        event.preventDefault();
+        setCurrentPage('admin');
+        window.scrollTo({ top: 0, behavior: 'auto' });
+      }
+    };
+
+    openFromHash();
+    window.addEventListener('hashchange', openFromHash);
+    window.addEventListener('keydown', openFromShortcut);
+    return () => {
+      window.removeEventListener('hashchange', openFromHash);
+      window.removeEventListener('keydown', openFromShortcut);
+    };
+  }, []);
 
   const handleStartCounting = (dhikrId?: string) => {
     if (dhikrId) {
@@ -286,7 +315,7 @@ export default function App() {
             />
           )}
 
-          {currentPage === 'admin-notifications' && <AdminNotificationsPage />}
+          {currentPage === 'admin' && <AdminPage onExit={() => handleNavigate('home')} />}
 
           {currentPage === 'backup' && (
             <BackupRestorePage settings={settings} onReplaceSettings={replaceSettings} />

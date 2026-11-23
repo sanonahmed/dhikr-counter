@@ -8,8 +8,14 @@ services:
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
+      # Required to enable the hidden admin panel. Unset = panel disabled and
+      # /api/ai/chat refuses all requests, so the AI key cannot be spent.
+      - key: ADMIN_PASSCODE
+        sync: false
+      # Optional: how long an admin login lasts before it expires (hours, max 168).
+      - key: ADMIN_SESSION_HOURS
+        value: "12"
       # Optional: a server-side provider key so the browser never holds one.
-      # Leave blank to only allow keys entered in the AI studio on the device.
       - key: AI_API_KEY
         sync: false
       - key: AI_BASE_URL

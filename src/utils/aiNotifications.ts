@@ -1,3 +1,5 @@
+import { getAdminToken, isAdminServerEndpoint } from './adminSession';
+
 export interface AiProviderConfig {
   baseUrl: string;
   apiKey: string;
@@ -258,11 +260,19 @@ class ProxyHostBlockedError extends Error {
  */
 async function requestViaProxy(config: AiProviderConfig, prompt: string, maxTokens: number): Promise<string | null> {
   const endpoints = resolveProxyEndpoints(config.proxyUrl);
+  const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json' };
+  // The proxy is admin-only. The bearer token is attached only when the request
+  // really goes to the server that issued it.
+  const adminToken = getAdminToken();
+  if (adminToken && isAdminServerEndpoint(endpoints.chat)) {
+    headers.Authorization = `Bearer ${adminToken}`;
+  }
+
   let response: Response;
   try {
     response = await fetch(endpoints.chat, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers,
       body: JSON.stringify({
         baseUrl: normalizeBaseUrl(config.baseUrl),
         apiKey: config.apiKey.trim(),

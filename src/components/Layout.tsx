@@ -2,7 +2,6 @@ import React from 'react';
 import {
   BarChart3,
   Bell,
-  Bot,
   BookOpen,
   Clock,
   FolderHeart,
@@ -46,6 +45,59 @@ export const Layout: React.FC<LayoutProps> = ({
 }) => {
   const t = getTranslations(language);
 
+  // Hidden owner entry point. The emblem behaves normally on a tap; holding it
+  // for a moment opens the admin panel. Nothing in the UI advertises this.
+  const ADMIN_LONG_PRESS_MS = 1400;
+  const adminPressTimer = React.useRef<number | null>(null);
+  const adminPressOpened = React.useRef(false);
+  const adminPressOrigin = React.useRef<{ x: number; y: number } | null>(null);
+
+  const cancelAdminPress = React.useCallback(() => {
+    adminPressOrigin.current = null;
+    if (adminPressTimer.current !== null) {
+      window.clearTimeout(adminPressTimer.current);
+      adminPressTimer.current = null;
+    }
+  }, []);
+
+  const startAdminPress = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
+    adminPressOpened.current = false;
+    cancelAdminPress();
+    adminPressOrigin.current = { x: event.clientX, y: event.clientY };
+    adminPressTimer.current = window.setTimeout(() => {
+      adminPressTimer.current = null;
+      onNavigate('admin');
+      adminPressOpened.current = true;
+    }, ADMIN_LONG_PRESS_MS);
+  }, [cancelAdminPress, onNavigate]);
+
+  // Scrolling or dragging across the emblem must not count as a long press.
+  const trackAdminPress = React.useCallback((event: React.PointerEvent<HTMLElement>) => {
+    const origin = adminPressOrigin.current;
+    if (!origin) return;
+    if (Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 12) {
+      cancelAdminPress();
+    }
+  }, [cancelAdminPress]);
+
+  const goHome = React.useCallback(() => {
+    // A completed long-press already opened the admin panel; swallow the click.
+    if (adminPressOpened.current) {
+      adminPressOpened.current = false;
+      return;
+    }
+    onNavigate('home');
+  }, [onNavigate]);
+
+  const emblemPressProps = {
+    onPointerDown: startAdminPress,
+    onPointerMove: trackAdminPress,
+    onPointerUp: cancelAdminPress,
+    onPointerLeave: cancelAdminPress,
+    onPointerCancel: cancelAdminPress,
+    onContextMenu: (event: React.MouseEvent) => event.preventDefault(),
+  };
+
   // Full-screen distraction-free counter view hides standard shell chrome
   if (currentPage === 'counter') {
     return <main className="min-h-screen w-full bg-[var(--bg-canvas)] text-[var(--text-primary)]">{children}</main>;
@@ -65,7 +117,6 @@ export const Layout: React.FC<LayoutProps> = ({
     { id: 'history', label: t.nav.history, icon: Clock },
     { id: 'customization', label: t.nav.customization, icon: Palette },
     { id: 'reminders', label: t.nav.reminders, icon: Bell },
-    { id: 'admin-notifications', label: 'AI Notifications', icon: Bot },
     { id: 'backup', label: t.nav.backup, icon: HardDriveDownload },
     { id: 'about', label: t.nav.about, icon: Info },
   ];
@@ -78,7 +129,7 @@ export const Layout: React.FC<LayoutProps> = ({
     if (tabId === 'statistics' && (currentPage === 'history' || currentPage === 'goals')) {
       return true;
     }
-    if (tabId === 'settings' && (currentPage === 'customization' || currentPage === 'reminders' || currentPage === 'admin-notifications' || currentPage === 'backup' || currentPage === 'about')) {
+    if (tabId === 'settings' && (currentPage === 'customization' || currentPage === 'reminders' || currentPage === 'backup' || currentPage === 'about')) {
       return true;
     }
     return false;
@@ -88,15 +139,16 @@ export const Layout: React.FC<LayoutProps> = ({
     <div className="min-h-screen w-full bg-[var(--bg-canvas)] text-[var(--text-primary)] flex flex-col lg:flex-row">
       {/* Desktop Sidebar Navigation (260px) */}
       <aside className="hidden lg:flex lg:flex-col lg:w-64 lg:fixed lg:inset-y-0 lg:left-0 bg-[var(--bg-surface)] border-r border-[var(--border-subtle)] z-30">
-        <div className="px-6 pt-6 pb-5 border-b border-[var(--border-subtle)] flex items-center gap-3">
+        <div className="px-6 pt-6 pb-5 border-b border-[var(--border-subtle)] flex items-center gap-3" {...emblemPressProps}>
           <img
             src="/icon.svg"
             alt="Dhikr Counter emblem"
-            className="w-9 h-9 rounded-xl shrink-0"
+            draggable={false}
+            className="w-9 h-9 rounded-xl shrink-0 select-none"
           />
           <button
             type="button"
-            onClick={() => onNavigate('home')}
+            onClick={goHome}
             className="text-left cursor-pointer"
           >
             <span className="font-display text-xl font-bold tracking-tight text-[var(--text-primary)] block leading-none">
@@ -176,10 +228,11 @@ export const Layout: React.FC<LayoutProps> = ({
         <header className="lg:hidden sticky top-0 z-30 h-13 px-4 bg-[var(--bg-surface)]/92 backdrop-blur-md border-b border-[var(--border-subtle)] flex items-center justify-between gap-3">
           <button
             type="button"
-            onClick={() => onNavigate('home')}
+            onClick={goHome}
+            {...emblemPressProps}
             className="flex items-center gap-2.5 min-w-0 cursor-pointer"
           >
-            <img src="/icon.svg" alt="Dhikr Counter" className="w-7 h-7 rounded-lg shrink-0" />
+            <img src="/icon.svg" alt="Dhikr Counter" draggable={false} className="w-7 h-7 rounded-lg shrink-0 select-none" />
             <span className="font-display text-lg font-bold text-[var(--text-primary)] truncate">
               {t.appName}
             </span>

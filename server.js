@@ -7,6 +7,7 @@
  *
  * Run with: npm start   (after npm run build)
  */
+import crypto from 'node:crypto';
 import dotenv from 'dotenv';
 import express from 'express';
 import fs from 'node:fs';
@@ -49,6 +50,91 @@ const PORT = Number(process.env.PORT) || 8787;
 const PROVIDER_TIMEOUT_MS = 60_000;
 const MAX_PROMPT_LENGTH = 4_000;
 const MAX_TOKENS_LIMIT = 2_000;
+
+/**
+ * Private admin panel.
+ *
+ * The AI studio is not a public feature. It lives behind a passcode that only
+ * the owner knows, verified here on the server. Sessions are opaque bearer
+ * tokens kept in memory, so a restart signs everyone out and nothing sensitive
+ * is ever written to disk. ADMIN_PASSCODE must be set; when it is empty the
+ * panel stays locked and /api/ai/chat refuses every request.
+ */
+const ADMIN_SESSION_DEFAULT_HOURS = 12;
+const ADMIN_SESSION_MAX_HOURS = 168;
+const ADMIN_MAX_FAILED_ATTEMPTS = 5;
+const ADMIN_FAILURE_WINDOW_MS = 15 * 60_000;
+
+function adminPasscode() {
+  return (process.env.ADMIN_PASSCODE || '').trim();
+}
+
+function adminSessionTtlMs() {
+  const hours = Number(process.env.ADMIN_SESSION_HOURS);
+  const safeHours = Number.isFinite(hours) && hours > 0
+    ? Math.min(hours, ADMIN_SESSION_MAX_HOURS)
+    : ADMIN_SESSION_DEFAULT_HOURS;
+  return Math.round(safeHours * 60 * 60 * 1000);
+}
+
+/** token -> expiry timestamp (ms). In-memory, intentionally not persisted. */
+const adminSessions = new Map();
+/** client IP -> { count, firstAt } for failed sign-ins. */
+const adminLoginFailures = new Map();
+
+function sha256(value) {
+  return crypto.createHash('sha256').update(String(value), 'utf8').digest();
+}
+
+/** Length-independent comparison so a wrong passcode leaks no timing signal. */
+function safeEqual(a, b) {
+  return crypto.timingSafeEqual(sha256(a), sha256(b));
+}
+
+function bearerToken(req) {
+  const match = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization || ''));
+  return match ? match[1] : '';
+}
+
+function purgeExpiredAdminSessions() {
+  const now = Date.now();
+  for (const [token, expiresAt] of adminSessions) {
+    if (expiresAt <= now) adminSessions.delete(token);
+  }
+}
+
+function adminSessionFrom(req) {
+  const token = bearerToken(req);
+  if (!token) return null;
+  const expiresAt = adminSessions.get(token);
+  if (!expiresAt) return null;
+  if (expiresAt <= Date.now()) {
+    adminSessions.delete(token);
+    return null;
+  }
+  return { token, expiresAt };
+}
+
+/** Gate for anything that must never be reachable by the public app. */
+function requireAdmin(req, res, next) {
+  if (!adminPasscode()) {
+    res.status(503).json({
+      error: 'Admin access is disabled. Set ADMIN_PASSCODE on the app server and restart it.',
+      code: 'admin_disabled',
+    });
+    return;
+  }
+  const session = adminSessionFrom(req);
+  if (!session) {
+    res.status(401).json({
+      error: 'Your admin session has ended. Unlock the admin panel again.',
+      code: 'admin_required',
+    });
+    return;
+  }
+  req.adminSession = session;
+  next();
+}
 
 const GEMINI_OPENAI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai';
 const DEFAULT_OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -187,6 +273,9 @@ function upstreamErrorMessage(status, payload) {
 
 const app = express();
 app.disable('x-powered-by');
+// One proxy hop in front of the app (Render, Cloud Run) so req.ip and the
+// admin login rate limit see the real client address.
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '64kb' }));
 
 /** Origins allowed to call /api from another site (a static deployment). */
@@ -222,7 +311,7 @@ app.use('/api', (req, res, next) => {
       res.setHeader('Access-Control-Allow-Origin', allowOrigin);
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept, Authorization');
       res.setHeader('Access-Control-Max-Age', '600');
     }
   }
@@ -237,11 +326,81 @@ app.get('/api/health', (_req, res) => {
   const { key, baseUrl, model } = providerDefaults();
   res.json({
     ok: true,
+    admin: { enabled: Boolean(adminPasscode()) },
     ai: { serverKeyConfigured: Boolean(key), defaultBaseUrl: baseUrl, defaultModel: model },
   });
 });
 
-app.post('/api/ai/chat', async (req, res) => {
+/**
+ * Admin sign-in. Returns an opaque bearer token; the client keeps it in
+ * sessionStorage. Failed attempts are rate-limited per client IP.
+ */
+app.post('/api/admin/login', (req, res) => {
+  const passcode = adminPasscode();
+  if (!passcode) {
+    res.status(503).json({
+      error: 'Admin access is disabled. Set ADMIN_PASSCODE on the app server and restart it.',
+      code: 'admin_disabled',
+    });
+    return;
+  }
+
+  const ip = req.ip || req.socket?.remoteAddress || 'unknown';
+  const now = Date.now();
+  const failure = adminLoginFailures.get(ip);
+  if (failure && now - failure.firstAt < ADMIN_FAILURE_WINDOW_MS) {
+    if (failure.count >= ADMIN_MAX_FAILED_ATTEMPTS) {
+      const retryAfterSeconds = Math.ceil((ADMIN_FAILURE_WINDOW_MS - (now - failure.firstAt)) / 1000);
+      res.setHeader('Retry-After', String(retryAfterSeconds));
+      res.status(429).json({
+        error: `Too many failed attempts. Try again in ${Math.ceil(retryAfterSeconds / 60)} minute(s).`,
+        code: 'admin_locked_out',
+      });
+      return;
+    }
+  } else if (failure) {
+    adminLoginFailures.delete(ip);
+  }
+
+  const supplied = typeof req.body?.passcode === 'string' ? req.body.passcode.slice(0, 256) : '';
+  if (!supplied || !safeEqual(supplied, passcode)) {
+    const current = adminLoginFailures.get(ip);
+    adminLoginFailures.set(
+      ip,
+      current && now - current.firstAt < ADMIN_FAILURE_WINDOW_MS
+        ? { count: current.count + 1, firstAt: current.firstAt }
+        : { count: 1, firstAt: now }
+    );
+    res.status(401).json({ error: 'Incorrect admin passcode.', code: 'admin_bad_passcode' });
+    return;
+  }
+
+  adminLoginFailures.delete(ip);
+  purgeExpiredAdminSessions();
+  const token = crypto.randomBytes(32).toString('base64url');
+  const expiresAt = now + adminSessionTtlMs();
+  adminSessions.set(token, expiresAt);
+  res.json({ token, expiresAt });
+});
+
+app.get('/api/admin/session', (req, res) => {
+  const session = adminSessionFrom(req);
+  res.json({
+    enabled: Boolean(adminPasscode()),
+    authenticated: Boolean(session),
+    expiresAt: session?.expiresAt,
+  });
+});
+
+app.post('/api/admin/logout', (req, res) => {
+  const token = bearerToken(req);
+  if (token) adminSessions.delete(token);
+  res.json({ ok: true });
+});
+
+// The AI relay is private: the server-side key must never be reachable from a
+// public page, so a valid admin session is required before any provider call.
+app.post('/api/ai/chat', requireAdmin, async (req, res) => {
   const body = req.body ?? {};
   const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : '';
   if (!prompt) {
@@ -409,6 +568,9 @@ const server = app.listen(PORT, () => {
   const { key, baseUrl, model } = providerDefaults();
   console.log(`Dhikr Counter server listening on http://localhost:${PORT}`);
   console.log(`AI proxy: ${baseUrl} (model: ${model}) - server key ${key ? 'configured' : 'not configured'}`);
+  console.log(
+    `Admin panel: ${adminPasscode() ? `enabled (${Math.round(adminSessionTtlMs() / 3_600_000)}h sessions)` : 'disabled - set ADMIN_PASSCODE to enable it'}`
+  );
 });
 
 // Without this handler a busy port crashes the process with a stack trace.

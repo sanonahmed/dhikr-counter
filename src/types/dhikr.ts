@@ -37,7 +37,7 @@ export type PageRoute =
   | 'customization'
   | 'reminders'
   | 'settings'
-  | 'admin-notifications'
+  | 'admin'
   | 'backup'
   | 'about';
 

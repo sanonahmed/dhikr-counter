@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Bell,
-  Bot,
   ChevronRight,
   Clock,
   FolderHeart,
@@ -62,7 +61,6 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
     { page: 'goals', title: t.nav.goals, subtitle: 'Daily, weekly, and monthly remembrance targets', icon: Target },
     { page: 'collections', title: t.nav.collections, subtitle: 'Morning, post-Salah, and custom playlists', icon: FolderHeart },
     { page: 'reminders', title: t.nav.reminders, subtitle: 'Local notification schedules', icon: Bell },
-    { page: 'admin-notifications', title: 'AI notification studio', subtitle: 'Connect an AI provider and draft a notification', icon: Bot },
     { page: 'history', title: t.nav.history, subtitle: 'Inspect, resume, and export sessions', icon: Clock },
     { page: 'backup', title: t.nav.backup, subtitle: 'JSON backup, restore, and CSV exports', icon: HardDriveDownload },
     { page: 'about', title: t.nav.about, subtitle: 'Privacy, authenticity, and PWA guide', icon: Info },
