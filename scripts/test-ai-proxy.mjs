@@ -33,6 +33,7 @@ const child = spawn(process.execPath, ['server.js'], {
     AI_BASE_URL: `http://127.0.0.1:${providerPort}/v1`,
     AI_MODEL: 'mock-model',
     AI_ALLOWED_HOSTS: '',
+    AI_PROXY_ORIGINS: 'https://frontend.example',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
 });
@@ -63,6 +64,26 @@ try {
 
   const health = await fetch(`${base}/api/health`).then((r) => r.json());
   check('health reports server key', health.ok === true && health.ai.serverKeyConfigured === true, JSON.stringify(health.ai));
+
+  const corsPreflight = await fetch(`${base}/api/ai/chat`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://frontend.example', 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'content-type' },
+  });
+  check('allowed static origin gets CORS preflight', corsPreflight.status === 204 && corsPreflight.headers.get('access-control-allow-origin') === 'https://frontend.example');
+
+  const unlistedPreflight = await fetch(`${base}/api/ai/chat`, {
+    method: 'OPTIONS',
+    headers: { Origin: 'https://unlisted.example', 'Access-Control-Request-Method': 'POST' },
+  });
+  check('unlisted origin is not granted CORS', unlistedPreflight.status === 204 && !unlistedPreflight.headers.has('access-control-allow-origin'));
+
+  const crossOriginProxied = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { Origin: 'https://frontend.example', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ prompt: 'Hi' }),
+  });
+  const crossOriginData = await crossOriginProxied.json();
+  check('named static origin can use proxy + server key', crossOriginProxied.headers.get('access-control-allow-origin') === 'https://frontend.example' && crossOriginData.content === 'Mock reply for model mock-model');
 
   const defaultsOnly = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',

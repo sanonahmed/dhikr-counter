@@ -2,6 +2,11 @@ export interface AiProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /**
+   * Optional absolute URL of a deployed copy of server.js, for static hosting
+   * where /api is not served by this app. Blank means "same origin".
+   */
+  proxyUrl: string;
 }
 
 export interface AiProviderPreset {
@@ -14,9 +19,42 @@ export interface AiProviderPreset {
 
 export const AI_PROVIDER_STORAGE_KEY = 'dhikr-counter-ai-provider-v1';
 
-/** Same-origin endpoint served by server.js. Absent on a static-only host. */
+/** Same-origin endpoints served by server.js. Absent on a static-only host. */
 export const AI_PROXY_ENDPOINT = '/api/ai/chat';
 export const AI_HEALTH_ENDPOINT = '/api/health';
+/** Build-time default for the proxy URL, used when the UI field is blank. */
+const ENV_PROXY_URL = typeof import.meta.env?.VITE_AI_PROXY_URL === 'string' ? import.meta.env.VITE_AI_PROXY_URL.trim() : '';
+
+export interface AiProxyEndpoints {
+  chat: string;
+  health: string;
+  /** True when the proxy runs on a different origin (a separately deployed server). */
+  crossOrigin: boolean;
+}
+
+/**
+ * Resolves where AI requests are sent. Blank keeps the bundled same-origin
+ * proxy; an absolute URL points at a server.js deployed elsewhere, which is how
+ * a static deployment (GitHub Pages, a Render static site) can still proxy.
+ */
+export function resolveProxyEndpoints(proxyUrl?: string): AiProxyEndpoints {
+  const configured = (proxyUrl || ENV_PROXY_URL || '').trim();
+  if (!configured) {
+    return { chat: AI_PROXY_ENDPOINT, health: AI_HEALTH_ENDPOINT, crossOrigin: false };
+  }
+  const trimmed = configured.replace(/\/+$/, '');
+  const chatUrl = /\/api\/ai\/chat$/i.test(trimmed) ? trimmed : `${trimmed}/api/ai/chat`;
+  try {
+    const parsed = new URL(chatUrl);
+    const health = new URL(parsed.toString());
+    health.pathname = '/api/health';
+    const pageOrigin = typeof window === 'undefined' ? '' : window.location.origin;
+    return { chat: parsed.toString(), health: health.toString(), crossOrigin: Boolean(pageOrigin) && parsed.origin !== pageOrigin };
+  } catch {
+    throw new Error('Enter a valid AI proxy URL, such as https://your-app.onrender.com.');
+  }
+}
+
 
 export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
   {
@@ -53,6 +91,7 @@ export const DEFAULT_AI_PROVIDER: AiProviderConfig = {
   baseUrl: AI_PROVIDER_PRESETS[0].baseUrl,
   apiKey: '',
   model: AI_PROVIDER_PRESETS[0].model,
+  proxyUrl: '',
 };
 
 
@@ -120,10 +159,16 @@ async function readJson(response: Response): Promise<Record<string, unknown> | n
   return (await response.json().catch(() => null)) as Record<string, unknown> | null;
 }
 
-/** Detects whether this deployment runs the bundled proxy from server.js. */
-export async function getAiProxyStatus(): Promise<AiProxyStatus> {
+/** Detects whether a deployment runs the bundled proxy from server.js. */
+export async function getAiProxyStatus(proxyUrl?: string): Promise<AiProxyStatus> {
+  let healthEndpoint = AI_HEALTH_ENDPOINT;
   try {
-    const response = await fetch(AI_HEALTH_ENDPOINT, { headers: { Accept: 'application/json' } });
+    healthEndpoint = resolveProxyEndpoints(proxyUrl).health;
+  } catch {
+    return { available: false, serverKeyConfigured: false };
+  }
+  try {
+    const response = await fetch(healthEndpoint, { headers: { Accept: 'application/json' } });
     const data = await readJson(response);
     const ai = data?.ai as { serverKeyConfigured?: boolean; defaultBaseUrl?: string; defaultModel?: string } | undefined;
     if (!response.ok || data?.ok !== true) return { available: false, serverKeyConfigured: false };
@@ -162,21 +207,22 @@ export function usesServerKey(config: AiProviderConfig, proxy: AiProxyStatus | n
  * Vite returns when server.js is not running. Report that instead of falling
  * back to a browser call the provider will block with a vague CORS error.
  */
-function proxyDownMessage(status: number): string {
+function proxyDownMessage(status: number, endpoint: string): string {
   return (
-    `The app server answered ${AI_PROXY_ENDPOINT} with HTTP ${status} instead of JSON, so the AI proxy is not running. ` +
+    `The app server answered ${endpoint} with HTTP ${status} instead of JSON, so the AI proxy is not running. ` +
     'Start it with "npm run dev" (development) or "npm start" (production), then try again.'
   );
 }
 
 /**
  * Sends the request through server.js. Returns null when no proxy is
- * deployed (static hosting), so the caller can fall back to a direct call.
+ * reachable (static hosting), so the caller can fall back to a direct call.
  */
 async function requestViaProxy(config: AiProviderConfig, prompt: string, maxTokens: number): Promise<string | null> {
+  const endpoints = resolveProxyEndpoints(config.proxyUrl);
   let response: Response;
   try {
-    response = await fetch(AI_PROXY_ENDPOINT, {
+    response = await fetch(endpoints.chat, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
@@ -188,6 +234,11 @@ async function requestViaProxy(config: AiProviderConfig, prompt: string, maxToke
       }),
     });
   } catch {
+    if (endpoints.crossOrigin) {
+      throw new Error(
+        `Could not reach the AI proxy at ${endpoints.chat}. Check that the server is running and that AI_PROXY_ORIGINS on it includes ${window.location.origin}.`
+      );
+    }
     return null;
   }
 
@@ -195,18 +246,52 @@ async function requestViaProxy(config: AiProviderConfig, prompt: string, maxToke
   // Static hosts rewrite unknown routes to index.html (HTML, not JSON). A 5xx
   // without JSON instead means a proxy is wired up but its backend is down.
   if (!data) {
-    if (response.status >= 500) throw new Error(proxyDownMessage(response.status));
+    if (endpoints.crossOrigin) {
+      throw new Error(`The AI proxy at ${endpoints.chat} did not return JSON (HTTP ${response.status}).`);
+    }
+    if (response.status >= 500) throw new Error(proxyDownMessage(response.status, endpoints.chat));
     return null;
   }
 
   const message = typeof data.error === 'string' ? data.error : '';
   if (!response.ok) {
-    if (response.status === 404 && message === 'Not found.') return null;
+    if (response.status === 404 && message === 'Not found.') {
+      if (endpoints.crossOrigin) {
+        throw new Error(`The AI proxy at ${endpoints.chat} has no /api/ai/chat route. Point the proxy URL at the app root, not a subpath.`);
+      }
+      return null;
+    }
     throw new Error(message || `The AI proxy failed (${response.status}).`);
   }
   const content = typeof data.content === 'string' ? data.content.trim() : '';
   if (!content) throw new Error('The AI proxy returned an empty response.');
   return content;
+}
+
+/**
+ * Hosts that reject browser requests outright (their POST responses carry no
+ * Access-Control-Allow-Origin), so a direct call can only fail.
+ */
+const BROWSER_BLOCKED_HOSTS = new Set(['api.openai.com']);
+
+export function needsProxyInBrowser(baseUrl: string): boolean {
+  return BROWSER_BLOCKED_HOSTS.has(hostOf(baseUrl));
+}
+
+function corsBlockedMessage(proxyEndpoint: string): string {
+  return (
+    `No AI proxy answered ${proxyEndpoint} on this site, so the browser called the provider directly and it was blocked by ` +
+    'cross-origin (CORS) rules. Serve the app with server.js ("npm start", or "npm run dev" locally), or enter a deployed ' +
+    'copy of this app in "AI proxy URL", or switch to a provider that allows browser requests (Google Gemini or OpenRouter).'
+  );
+}
+
+function providerBlocksBrowserMessage(host: string, proxyEndpoint: string): string {
+  return (
+    `${host} does not allow browser requests, and no AI proxy answered ${proxyEndpoint}, so this request cannot succeed ` +
+    'from the page. Switch to a provider that allows browser requests (Google Gemini or OpenRouter), or serve the app with ' +
+    'server.js / enter a deployed copy of it in "AI proxy URL".'
+  );
 }
 
 async function requestDirect(config: AiProviderConfig, prompt: string, maxTokens: number): Promise<string> {
@@ -229,11 +314,7 @@ async function requestDirect(config: AiProviderConfig, prompt: string, maxTokens
     });
   } catch (error) {
     if (error instanceof TypeError) {
-      throw new Error(
-        'No app server answered /api/ai/chat, so the browser called the provider directly and the provider blocked it ' +
-          'with cross-origin (CORS) rules. Start the bundled server with "npm run dev" (development) or "npm start" ' +
-          '(production) to relay the request, or use a provider that allows browser requests, such as Google Gemini or OpenRouter.'
-      );
+      throw new Error(corsBlockedMessage(resolveProxyEndpoints(config.proxyUrl).chat));
     }
     throw error;
   }
@@ -265,6 +346,11 @@ export async function requestAiCompletionDetailed(
 
   const proxied = await requestViaProxy(config, prompt, maxTokens);
   if (proxied !== null) return { content: proxied, route: 'proxy' };
+
+  // Skip a direct call that the provider is guaranteed to block in the browser.
+  if (needsProxyInBrowser(config.baseUrl)) {
+    throw new Error(providerBlocksBrowserMessage(hostOf(config.baseUrl), resolveProxyEndpoints(config.proxyUrl).chat));
+  }
 
   return { content: await requestDirect(config, prompt, maxTokens), route: 'direct' };
 }

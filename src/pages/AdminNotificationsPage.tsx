@@ -9,6 +9,7 @@ import {
   DEFAULT_AI_PROVIDER,
   getAiProxyStatus,
   loadAiProvider,
+  needsProxyInBrowser,
   requestAiCompletionDetailed,
   saveAiProvider,
   usesServerKey,
@@ -37,23 +38,30 @@ export const AdminNotificationsPage: React.FC = () => {
 
   useEffect(() => {
     let active = true;
-    void getAiProxyStatus().then((status) => {
-      if (active) {
+    // Debounced so typing a proxy URL does not probe on every keystroke.
+    const timer = setTimeout(() => {
+      void getAiProxyStatus(config.proxyUrl).then((status) => {
+        if (!active) return;
         setProxy(status);
         if (status.serverKeyConfigured && status.defaultBaseUrl && status.defaultModel) {
           try {
             const hasSavedConfig = Boolean(localStorage.getItem(AI_PROVIDER_STORAGE_KEY));
             if (!hasSavedConfig) {
-              setConfig({ ...DEFAULT_AI_PROVIDER, baseUrl: status.defaultBaseUrl, model: status.defaultModel });
+              setConfig((current) => ({
+                ...DEFAULT_AI_PROVIDER,
+                baseUrl: status.defaultBaseUrl!,
+                model: status.defaultModel!,
+                proxyUrl: current.proxyUrl,
+              }));
             }
           } catch {
             // The provider config remains editable if browser storage is disabled.
           }
         }
-      }
-    });
-    return () => { active = false; };
-  }, []);
+      });
+    }, 400);
+    return () => { active = false; clearTimeout(timer); };
+  }, [config.proxyUrl]);
 
   const canRequest = Boolean(config.baseUrl.trim() && config.model.trim() && (config.apiKey.trim() || usesServerKey(config, proxy)));
   const serverKeyReady = usesServerKey(config, proxy);
@@ -112,6 +120,10 @@ export const AdminNotificationsPage: React.FC = () => {
         <label className="space-y-1.5 text-xs font-medium">Model<Input autoComplete="off" placeholder="gpt-4o-mini" value={config.model} onChange={(e) => update({ model: e.target.value })} /></label>
         <label className="space-y-1.5 text-xs font-medium">API key (sent directly to provider)<span className="flex gap-2"><Input className="min-w-0" type={showKey ? 'text' : 'password'} autoComplete="off" placeholder="Paste API key" value={config.apiKey} onChange={(e) => update({ apiKey: e.target.value })} /><Button variant="outline" onClick={() => setShowKey(!showKey)}>{showKey ? 'Hide' : 'Show'}</Button></span></label>
       </div>
+      <label className="block space-y-1.5 text-xs font-medium">AI proxy URL (optional)<Input type="url" autoComplete="url" placeholder="Leave blank when this app serves its own /api" value={config.proxyUrl} onChange={(e) => update({ proxyUrl: e.target.value })} />
+        <span className="block text-[11px] font-normal leading-relaxed text-[var(--text-muted)]">Only needed on a static host with no /api server. Paste a deployed copy of this app (for example https://your-app.onrender.com); it must list this page's origin in AI_PROXY_ORIGINS.</span>
+      </label>
+      {!proxy?.available && needsProxyInBrowser(config.baseUrl) && <div className="flex gap-2 rounded-xl border border-red-500/30 bg-red-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-600" /><p>This provider rejects browser requests and no AI proxy is reachable from this page, so the test cannot succeed. Use Google Gemini or OpenRouter, or point the AI proxy URL above at a server running <code className="rounded bg-[var(--bg-surface-muted)] px-1">npm start</code>.</p></div>}
       <div className="flex flex-wrap gap-2"><Button onClick={save}><CheckCircle2 className="h-4 w-4" />Save on device</Button><Button variant="outline" disabled={busy !== null || !canRequest} onClick={() => void providerAction('test')}>{busy === 'test' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <PlugZap className="h-4 w-4" />}Test provider</Button><Button variant="ghost" onClick={clear}><Trash2 className="h-4 w-4" />Clear key</Button></div>
       <div className="flex gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed text-[var(--text-secondary)]"><ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" /><p>This is not a secured admin login. Your key is stored in this browser and may be accessible to other users of this device. For shared administration, use a secured backend; never expose a private key in a public app.</p></div>
     </Card>
@@ -129,7 +141,7 @@ export const AdminNotificationsPage: React.FC = () => {
     </Card>
     {notice && <p role="status" className={`rounded-xl border p-3 text-sm ${notice.error ? 'border-red-500/30 text-red-700 dark:text-red-300' : 'border-[var(--accent-primary)]/25 text-[var(--accent-primary)]'}`}>{notice.text}</p>}
     <p className="text-xs leading-relaxed text-[var(--text-muted)]">{proxy?.available
-      ? `Requests go through this app's server (proxy ready${proxy.serverKeyConfigured ? ', server key configured' : ''}), so the provider's browser (CORS) policy does not matter.`
-      : 'The AI proxy is not reachable, so requests go directly from your browser and the provider must allow browser (CORS) requests. Google Gemini and OpenRouter do; OpenAI needs the bundled server — run "npm run dev" locally or "npm start" in production.'} Enter the base URL only (for example, https://api.openai.com/v1); /chat/completions is added automatically. Device notifications need permission and typically HTTPS; this tool cannot notify other users or deliver while the app is closed.</p>
+      ? `Requests go through the AI proxy (${config.proxyUrl.trim() || 'this app'})${proxy.serverKeyConfigured ? ' with a server key configured' : ''}, so the provider's browser (CORS) policy does not matter.`
+      : 'The AI proxy is not reachable, so requests go directly from your browser and the provider must allow browser (CORS) requests. Google Gemini and OpenRouter do; OpenAI never does, so it needs the bundled server or a proxy URL above.'} Enter the base URL only (for example, https://api.openai.com/v1); /chat/completions is added automatically. Device notifications need permission and typically HTTPS; this tool cannot notify other users or deliver while the app is closed.</p>
   </div>;
 };

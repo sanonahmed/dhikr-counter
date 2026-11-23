@@ -16,3 +16,7 @@ services:
         value: https://generativelanguage.googleapis.com/v1beta/openai
       - key: AI_MODEL
         value: gemini-2.5-flash
+      # Optional: comma-separated origins of a static frontend allowed to use this
+      # service as its AI proxy (for example https://dhikr-counter.onrender.com).
+      - key: AI_PROXY_ORIGINS
+        sync: false

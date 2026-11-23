@@ -96,10 +96,13 @@ Starting only Vite leaves `/api` without a backend, so AI requests fall back to
 direct browser calls and providers such as OpenAI reject them with a CORS error.
 Start server.js too (`npm run dev` does both), then verify with `npm run test:proxy`.
 
-> **"No app server answered /api/ai/chat" (CORS error in the AI studio)?** The
-> proxy was not running. Use `npm run dev` locally or `npm start` in production,
-> and make sure the app is opened on port 3000 during development — keys are
-> stored per origin, so a different port or host starts with empty settings.
+> **"No AI proxy answered /api/ai/chat" (CORS error in the AI studio)?** The app
+> was served without `server.js` (a static host), so requests fell back to direct
+> browser calls. Use `npm run dev` locally or `npm start` in production; on a
+> static host, paste a deployed copy of this app into **AI proxy URL** in the AI
+> studio. Keys are stored per origin, so a different port or host starts with
+> empty settings. Note that OpenAI never accepts browser requests, so it always
+> needs a proxy — Google Gemini and OpenRouter do not.
 
 ---
 
@@ -130,4 +133,7 @@ The blueprint creates a **Node web service** (`npm start`), not a static site, b
 5. Click **Create Web Service**.
 
 ### Static hosting only
-If you must keep a static deployment, AI generation still works with a provider that allows browser requests (Google Gemini, OpenRouter) after pasting a key in the studio. OpenAI requires the Node service.
+If you must keep a static deployment, you have two options:
+
+1. **Provider that allows browser requests** — Google Gemini or OpenRouter, with a key pasted in the studio. No server needed.
+2. **Keep OpenAI working through a proxy** — deploy this repo as a Node web service (Option 1 or 2 above), set its `AI_PROXY_ORIGINS` environment variable to the exact origin of the static site (for example `https://dhikr-counter.onrender.com`), then paste that service's URL into **AI proxy URL** in the studio. The static site then sends AI requests to that proxy without a rebuild. The server enables CORS only for the origins listed; `"*"` allows any site to relay its own key but never grants access to the server-side key.

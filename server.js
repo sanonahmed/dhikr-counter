@@ -136,6 +136,47 @@ const app = express();
 app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
 
+/** Origins allowed to call /api from another site (a static deployment). */
+const AI_PROXY_ORIGINS = (process.env.AI_PROXY_ORIGINS || '')
+  .split(',')
+  .map((entry) => entry.trim().replace(/\/+$/, ''))
+  .filter(Boolean);
+
+function isSameOriginRequest(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try {
+    return new URL(origin).host === req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * CORS for /api, off unless AI_PROXY_ORIGINS is set. This lets a statically
+ * hosted frontend use this server as its AI proxy. "*" allows any site to send
+ * its own provider key through here; only named origins may use the server key.
+ */
+app.use('/api', (req, res, next) => {
+  const origin = req.headers.origin;
+  if (origin && AI_PROXY_ORIGINS.length) {
+    const named = AI_PROXY_ORIGINS.includes(origin.replace(/\/+$/, ''));
+    const allowOrigin = named ? origin : AI_PROXY_ORIGINS.includes('*') ? '*' : '';
+    if (allowOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', allowOrigin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Accept');
+      res.setHeader('Access-Control-Max-Age', '600');
+    }
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 app.get('/api/health', (_req, res) => {
   const { key, baseUrl, model } = providerDefaults();
   res.json({
@@ -179,8 +220,13 @@ app.post('/api/ai/chat', async (req, res) => {
   }
 
   // Only use the server-side key for the provider it was configured for, so a
-  // client-supplied URL can never receive the deployment's secret.
-  const serverKeyApplies = Boolean(defaults.key) && endpoint.hostname.toLowerCase() === configuredProviderHost();
+  // client-supplied URL can never receive the deployment's secret. Cross-origin
+  // callers must also be named in AI_PROXY_ORIGINS ("*" is not enough).
+  const namedOrigin = AI_PROXY_ORIGINS.includes(String(req.headers.origin || '').replace(/\/+$/, ''));
+  const serverKeyApplies =
+    Boolean(defaults.key) &&
+    endpoint.hostname.toLowerCase() === configuredProviderHost() &&
+    (isSameOriginRequest(req) || namedOrigin);
   const apiKey = clientKey || (serverKeyApplies ? defaults.key.trim() : '');
 
   const headers = { 'Content-Type': 'application/json' };
