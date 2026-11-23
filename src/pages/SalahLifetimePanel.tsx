@@ -63,6 +63,28 @@ export const SalahLifetimePanel: React.FC<Props> = ({ language, salahDays, selec
     const labelDay = firstOfMonth ?? (weekIndex === 0 ? calendarDays[0] : null);
     return labelDay ? new Intl.DateTimeFormat(locale, { month: 'short' }).format(fromLocalDayKey(labelDay)) : '';
   });
+  const mobileMonths = Array.from({ length: 12 }, (_, monthIndex) => {
+    const monthDate = fromLocalDayKey(calendarDays[calendarDays.length - 1]);
+    monthDate.setDate(1);
+    monthDate.setMonth(monthDate.getMonth() - (11 - monthIndex));
+    const year = monthDate.getFullYear();
+    const month = monthDate.getMonth();
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const monthStart = toLocalDayKey(new Date(year, month, 1));
+    const cells: (string | null)[] = Array.from({ length: monthDate.getDay() + daysInMonth }, (_, cellIndex) => {
+      if (cellIndex < monthDate.getDay()) return null;
+      const dayKey = toLocalDayKey(new Date(year, month, cellIndex - monthDate.getDay() + 1));
+      return dayKey >= calendarDays[0] && dayKey <= calendarDays[calendarDays.length - 1] ? dayKey : null;
+    });
+    return {
+      id: monthStart,
+      label: new Intl.DateTimeFormat(locale, { month: 'short' }).format(monthDate),
+      cells,
+    };
+  });
+  const mobileWeekdayLabels = Array.from({ length: 7 }, (_, weekdayIndex) =>
+    new Intl.DateTimeFormat(locale, { weekday: 'narrow' }).format(fromLocalDayKey(addDays(calendarDays[calendarDays.length - 1], -fromLocalDayKey(calendarDays[calendarDays.length - 1]).getDay() + weekdayIndex))),
+  );
 
   return (
     <section className="space-y-4" aria-label={t.salah.lifetimeTitle}>
@@ -90,7 +112,7 @@ export const SalahLifetimePanel: React.FC<Props> = ({ language, salahDays, selec
       <div className="grid gap-4 lg:grid-cols-[1.15fr_.85fr]">
         <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-surface)] p-5 shadow-[var(--shadow-card)] sm:p-6">
           <div className="flex items-start justify-between gap-3"><div><h3 className="text-sm font-semibold text-[var(--text-primary)]">{t.salah.activityTitle}</h3><p className="mt-1 text-xs leading-5 text-[var(--text-muted)]">{t.salah.activitySubtitle}</p></div><span className="shrink-0 rounded-lg bg-[var(--accent-soft)] px-2.5 py-1.5 text-[10px] font-semibold text-[var(--accent-primary)]">{t.salah.pastYear}</span></div>
-          <div className="mt-5 overflow-x-auto pb-2" role="group" aria-label={t.salah.activityTitle}>
+          <div className="mt-5 hidden overflow-x-auto pb-2 md:block" role="group" aria-label={t.salah.activityTitle}>
             <div className="grid min-w-[600px] gap-x-[3px] gap-y-1" style={{ gridTemplateColumns: '16px repeat(53, minmax(0, 1fr))' }}>
               <span aria-hidden="true" />
               {monthLabels.map((month, weekIndex) => <span key={`month-${weekIndex}`} className="relative h-4 overflow-visible text-[9px] leading-3 text-[var(--text-muted)]">{month && <span className="absolute left-0 whitespace-nowrap">{month}</span>}</span>)}
@@ -108,6 +130,27 @@ export const SalahLifetimePanel: React.FC<Props> = ({ language, salahDays, selec
                 }),
               ])}
             </div>
+          </div>
+          <div className="mt-4 space-y-3 md:hidden" role="group" aria-label={t.salah.activityTitle}>
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-medium text-[var(--text-muted)]" aria-hidden="true">
+              {mobileWeekdayLabels.map((label, index) => <span key={`mobile-weekday-${index}`}>{label}</span>)}
+            </div>
+            {mobileMonths.map((month) => (
+              <div key={month.id} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)]/60 p-3">
+                <h4 className="mb-2 text-xs font-semibold text-[var(--text-secondary)]">{month.label}</h4>
+                <div className="grid grid-cols-7 gap-1">
+                  {month.cells.map((dayKey, cellIndex) => {
+                    if (!dayKey) return <span key={`mobile-empty-${month.id}-${cellIndex}`} className="mx-auto h-8 w-8 max-w-full" aria-hidden="true" />;
+                    const day = daysByKey.get(dayKey);
+                    const count = PRAYERS.filter((prayer) => day?.statuses?.[prayer] === 'prayed').length;
+                    const marked = PRAYERS.filter((prayer) => Boolean(day?.statuses?.[prayer])).length;
+                    const color = !marked ? 'bg-[var(--bg-surface-muted)]' : count === 5 ? 'bg-[var(--accent-gold)]' : count >= 3 ? 'bg-[var(--accent-primary)]' : count > 0 ? 'bg-[var(--accent-primary)]/55' : 'bg-red-400/70';
+                    const labelText = `${formatDate(dayKey, language, true)} · ${fmt(count)}/5 ${t.salah.lifetimePrayersShort}`;
+                    return <button key={dayKey} type="button" title={labelText} aria-label={labelText} aria-pressed={selectedDay === dayKey} onClick={() => onSelectDay(dayKey)} className={cn('mx-auto flex h-8 w-8 max-w-full items-center justify-center rounded-lg text-[11px] font-medium tabular-nums text-[var(--text-primary)] transition-transform active:scale-95', color, selectedDay === dayKey && 'ring-2 ring-[var(--accent-gold)] ring-offset-1')}><span>{fromLocalDayKey(dayKey).getDate()}</span></button>;
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 text-[10px] text-[var(--text-muted)]"><span>{fmt(recorded.filter((day) => calendarDays[0] <= day.id).length)} {t.salah.activityRecordedDays}</span><span className="inline-flex items-center gap-1.5"><span>{t.salah.less}</span>{['bg-[var(--bg-surface-muted)]', 'bg-[var(--accent-primary)]/45', 'bg-[var(--accent-primary)]', 'bg-[var(--accent-gold)]'].map((color) => <span key={color} className={cn('h-[10px] w-[10px] rounded-[3px]', color)} />)}<span>{t.salah.more}</span></span></div>
           <p className="mt-4 border-t border-[var(--border-subtle)] pt-3 text-[10px] leading-relaxed text-[var(--text-muted)]">{t.salah.heatmapHint}</p>
