@@ -9,14 +9,42 @@
  */
 import dotenv from 'dotenv';
 import express from 'express';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 // Load ignored local secrets first; already-exported environment and .env values
 // remain available as deployment fallbacks.
-dotenv.config({ path: path.join(__dirname, '.env.local') });
-dotenv.config({ path: path.join(__dirname, '.env') });
+const ENV_FILES = ['.env.local', '.env'];
+
+function loadEnvFiles({ override = false } = {}) {
+  for (const file of ENV_FILES) {
+    dotenv.config({ path: path.join(__dirname, file), override, quiet: true });
+  }
+}
+
+// Boot keeps the previous precedence: real environment variables win over files.
+loadEnvFiles();
+
+/**
+ * In development, re-read the env files when they change so editing
+ * AI_ALLOWED_HOSTS or AI_PROXY_ORIGINS takes effect without a restart.
+ * `node --watch` only restarts on imported files, and .env is not imported.
+ * Guarded to development and to a present file, so production boots unchanged.
+ */
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    fs.watch(__dirname, (_event, filename) => {
+      if (!filename || !ENV_FILES.includes(String(filename))) return;
+      loadEnvFiles({ override: true });
+      console.log(`[ai-proxy] reloaded ${filename} (AI_ALLOWED_HOSTS / AI_PROXY_ORIGINS updated).`);
+    });
+  } catch {
+    // A missing directory or an unsupported watcher should never break startup.
+  }
+}
+
 const PORT = Number(process.env.PORT) || 8787;
 const PROVIDER_TIMEOUT_MS = 60_000;
 const MAX_PROMPT_LENGTH = 4_000;
@@ -162,10 +190,12 @@ app.disable('x-powered-by');
 app.use(express.json({ limit: '64kb' }));
 
 /** Origins allowed to call /api from another site (a static deployment). */
-const AI_PROXY_ORIGINS = (process.env.AI_PROXY_ORIGINS || '')
-  .split(',')
-  .map((entry) => entry.trim().replace(/\/+$/, ''))
-  .filter(Boolean);
+function proxyOrigins() {
+  return (process.env.AI_PROXY_ORIGINS || '')
+    .split(',')
+    .map((entry) => entry.trim().replace(/\/+$/, ''))
+    .filter(Boolean);
+}
 
 function isSameOriginRequest(req) {
   const origin = req.headers.origin;
@@ -184,9 +214,10 @@ function isSameOriginRequest(req) {
  */
 app.use('/api', (req, res, next) => {
   const origin = req.headers.origin;
-  if (origin && AI_PROXY_ORIGINS.length) {
-    const named = AI_PROXY_ORIGINS.includes(origin.replace(/\/+$/, ''));
-    const allowOrigin = named ? origin : AI_PROXY_ORIGINS.includes('*') ? '*' : '';
+  const allowedOrigins = proxyOrigins();
+  if (origin && allowedOrigins.length) {
+    const named = allowedOrigins.includes(origin.replace(/\/+$/, ''));
+    const allowOrigin = named ? origin : allowedOrigins.includes('*') ? '*' : '';
     if (allowOrigin) {
       res.setHeader('Access-Control-Allow-Origin', allowOrigin);
       res.setHeader('Vary', 'Origin');
@@ -252,7 +283,7 @@ app.post('/api/ai/chat', async (req, res) => {
   // Only use the server-side key for the provider it was configured for, so a
   // client-supplied URL can never receive the deployment's secret. Cross-origin
   // callers must also be named in AI_PROXY_ORIGINS ("*" is not enough).
-  const namedOrigin = AI_PROXY_ORIGINS.includes(String(req.headers.origin || '').replace(/\/+$/, ''));
+  const namedOrigin = proxyOrigins().includes(String(req.headers.origin || '').replace(/\/+$/, ''));
   const serverKeyApplies =
     Boolean(defaults.key) &&
     endpoint.hostname.toLowerCase() === configuredProviderHost() &&

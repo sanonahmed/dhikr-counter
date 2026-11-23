@@ -96,6 +96,10 @@ Starting only Vite leaves `/api` without a backend, so AI requests fall back to
 direct browser calls and providers such as OpenAI reject them with a CORS error.
 Start server.js too (`npm run dev` does both), then verify with `npm run test:proxy`.
 
+In development, `server.js` re-reads `.env.local` when the file changes, so an
+edited `AI_ALLOWED_HOSTS` or `AI_PROXY_ORIGINS` applies on the next request
+without restarting anything. Deployments still pick these up on redeploy.
+
 > **"No AI proxy answered /api/ai/chat" (CORS error in the AI studio)?** The app
 > was served without `server.js` (a static host), so requests fell back to direct
 > browser calls. Use `npm run dev` locally or `npm start` in production; on a
