@@ -149,3 +149,8 @@ If you must keep a static deployment, you have two options:
 
 1. **Provider that allows browser requests** — Google Gemini or OpenRouter, with a key pasted in the studio. No server needed.
 2. **Keep OpenAI working through a proxy** — deploy this repo as a Node web service (Option 1 or 2 above), set its `AI_PROXY_ORIGINS` environment variable to the exact origin of the static site (for example `https://dhikr-counter.onrender.com`), then paste that service's URL into **AI proxy URL** in the studio. The static site then sends AI requests to that proxy without a rebuild. The server enables CORS only for the origins listed; `"*"` allows any site to relay its own key but never grants access to the server-side key.
+3. **Wire the proxy at build time** — set `VITE_AI_PROXY_URL=https://your-node-service.onrender.com` in the static site's build environment and redeploy. Every visitor then uses that proxy with no manual step, and the studio shows the URL as its default.
+
+To check which kind of service a URL is, open `/api/health`: a Node deployment answers `{"ok":true,"ai":{...}}`, while a static site returns `index.html` for that path (the app then reports "No AI proxy answered /api/ai/chat"). Render cannot convert a static site into a web service, so a static-only deployment always needs one of the options above.
+
+A provider that sends no CORS headers at all — a self-hosted OpenAI-compatible server, for example — can only ever work through a proxy, from any origin.

@@ -20,3 +20,8 @@ services:
       # service as its AI proxy (for example https://dhikr-counter.onrender.com).
       - key: AI_PROXY_ORIGINS
         sync: false
+      # Required for any custom OpenAI-compatible provider host that is not in the
+      # built-in list. Hostnames only, comma-separated (for example
+      # freellmapi-i2u7.onrender.com). Without it the proxy answers host_not_allowed.
+      - key: AI_ALLOWED_HOSTS
+        sync: false
