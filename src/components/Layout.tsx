@@ -310,10 +310,8 @@ export const Layout: React.FC<LayoutProps> = ({
         >
           <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_22%,rgba(225,198,125,0.22),transparent_46%)] opacity-80" />
           {!aiTalkOpen && <AiTalkOrb mode="idle" className="pointer-events-none absolute inset-0 scale-[1.12] transition-transform duration-300 group-hover:scale-[1.22]" />}
-          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true" className="pointer-events-none relative z-10 h-6 w-6 text-[#f0d58c] drop-shadow-[0_0_8px_rgba(240,213,140,0.8)]">
-            <rect x="9" y="9" width="30" height="30" rx="2" />
-            <rect x="9" y="9" width="30" height="30" rx="2" transform="rotate(45 24 24)" />
-            <circle cx="24" cy="24" r="3.5" />
+          <svg viewBox="0 0 48 48" aria-hidden="true" className="ai-talk-launcher-moon pointer-events-none relative z-10 h-8 w-8 text-[#f0d58c] drop-shadow-[0_0_10px_rgba(240,213,140,0.9)]">
+            <path d="M31.4 6.8a19.5 19.5 0 1 0 10 34.3A21.5 21.5 0 0 1 31.4 6.8Z" fill="currentColor" stroke="#fff0bd" strokeWidth="1.2" strokeLinejoin="round" />
           </svg>
         </button>
       )}

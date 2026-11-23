@@ -273,6 +273,16 @@ body {
   box-shadow: inset -16px -18px 35px rgba(0, 0, 0, 0.58), 0 0 48px rgba(31, 162, 108, 0.18);
 }
 
+.ai-talk-launcher-moon {
+  transform-origin: 50% 50%;
+  animation: ai-talk-moon-drift 4.2s ease-in-out infinite;
+}
+
+@keyframes ai-talk-moon-drift {
+  0%, 100% { transform: translateY(0) rotate(-12deg) scale(1); }
+  50% { transform: translateY(-2px) rotate(8deg) scale(1.1); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .ai-talk-breathe,
   .ai-talk-breathe-fast,
