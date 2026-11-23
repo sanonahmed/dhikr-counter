@@ -61,37 +61,68 @@
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
     <link rel="stylesheet" href="/seo.css" />
   </head>
-  <body>
+  <body class="developer-page">
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header"><div class="header-inner">
       <a class="brand" href="/" aria-label="Dhikr Counter home"><img src="/icon.svg" alt="" width="38" height="38" /><span>Dhikr Counter</span></a>
       <nav class="site-nav" aria-label="Main navigation"><a href="/">Open counter</a><a href="/features.html">Features</a><a href="/guides/digital-tasbih.html">Digital tasbih guide</a><a href="/privacy.html">Privacy</a></nav>
     </div></header>
-    <main id="main" class="content">
+    <main id="main" class="content developer-content">
       <p class="breadcrumb"><a href="/">Home</a> / Developer</p>
-      <p class="eyebrow">The person behind the project</p>
-      <h1>Sawon Ahmed, developer of Dhikr Counter</h1>
-      <p class="lede">Sawon Ahmed is the developer of Dhikr Counter, a free digital tasbih and dhikr app designed to make personal remembrance easier to count and organize on the web.</p>
-      <section class="article-card profile-card" aria-label="Sawon Ahmed profile">
-        <figure class="profile-portrait">
-          <img src="/developers/sawonahmed.jpg" alt="Sawon Ahmed, developer of Dhikr Counter" width="1612" height="2015" fetchpriority="high" />
-          <figcaption>Sawon Ahmed, developer of Dhikr Counter</figcaption>
+      <section class="developer-hero" aria-labelledby="developer-name">
+        <div class="developer-intro">
+          <p class="developer-kicker"><span></span> Developer profile · Dhikr Counter</p>
+          <h1 id="developer-name">Sawon Ahmed</h1>
+          <p class="developer-role">Software developer &amp; creator of Dhikr Counter</p>
+          <p class="developer-summary">Sawon Ahmed is the developer behind Dhikr Counter, a free digital tasbih and dhikr app built to make personal remembrance easier to count, organize, and revisit.</p>
+          <div class="developer-actions">
+            <a class="developer-button" href="/">Explore the app <span aria-hidden="true">↗</span></a>
+            <a class="developer-text-link" href="https://github.com/sanonahmed/dhikr-counter" target="_blank" rel="noreferrer">View project source <span aria-hidden="true">↗</span></a>
+          </div>
+          <div class="developer-facts" aria-label="Project highlights">
+            <div><strong>01</strong><span>Featured project</span></div>
+            <div><strong>EN · বাংলা</strong><span>Two interface languages</span></div>
+            <div><strong>Web app</strong><span>Installable and offline-capable</span></div>
+          </div>
+        </div>
+        <figure class="developer-portrait">
+          <div class="developer-portrait-frame">
+            <img src="/developers/sawonahmed.jpg" alt="Portrait of Sawon Ahmed, software developer and creator of Dhikr Counter" width="1612" height="2015" fetchpriority="high" />
+            <div class="portrait-caption"><span class="portrait-caption-mark" aria-hidden="true">SA</span><span><strong>Sawon Ahmed</strong><small>Developer · Dhikr Counter</small></span></div>
+          </div>
+          <figcaption>Developer of Dhikr Counter</figcaption>
         </figure>
-        <div class="profile-copy">
-          <h2>About Sawon Ahmed</h2>
-          <p>Sawon Ahmed develops Dhikr Counter, a browser-based tool for keeping track of dhikr, durood, istighfar, and tasbih. The project brings a digital counter together with a library of remembrance entries and optional features for personal use.</p>
-          <p>The app provides an English and Bengali interface, personal goals and reminders, session history, and an installable progressive web app experience. Its local-first design keeps personal counting records in the user's browser rather than requiring an account or automatic cloud sync.</p>
+      </section>
+      <section class="developer-story" aria-labelledby="about-sawon">
+        <div class="story-heading"><p class="eyebrow">About the developer</p><h2 id="about-sawon">Building a thoughtful digital tasbih</h2></div>
+        <div class="story-copy">
+          <p>Sawon Ahmed develops Dhikr Counter, a browser-based tool for keeping track of dhikr, durood, istighfar, and tasbih. The project brings a clear counting experience together with a library of remembrance entries and practical tools for personal use.</p>
+          <p>The app reflects a product-focused approach to software development: its counter, saved sessions, goals, reminders, and customization are brought together in one installable web app. An English and Bengali interface makes the experience available in both languages.</p>
         </div>
       </section>
-      <section class="article-card">
-        <h2>About the Dhikr Counter project</h2>
-        <p>Dhikr Counter is a free Islamic dhikr counter and digital tasbih developed by Sawon Ahmed. People can choose an entry, count at their own pace, set optional personal targets, and review their own history. The app also includes tools for collections, customization, backups, and optional reminders.</p>
-        <p>As an installable web app, Dhikr Counter can support offline use after the app and its required resources have loaded and been cached. Features that depend on online services still require a connection. The app is a counting aid, not a religious authority or a substitute for trusted Islamic sources and qualified scholarship.</p>
-        <h2>Project approach</h2>
-        <p>The project combines a straightforward digital tasbih with practical controls for privacy, accessibility, and personal organization. English and Bengali language options help make the interface useful to more people, while optional goals and statistics are presented as personal tracking tools—not as measures of religious worth.</p>
-        <h2>Explore the project</h2>
-        <p>Learn more about the <a href="/features.html">Dhikr Counter features</a>, read the <a href="/guides/digital-tasbih.html">digital tasbih guide</a>, or <a href="/">open the free dhikr counter</a>.</p>
-        <a class="cta" href="/">Open Dhikr Counter</a>
+      <section class="developer-project" aria-labelledby="project-title">
+        <div class="project-heading">
+          <p class="eyebrow">Featured work</p>
+          <h2 id="project-title">Dhikr Counter</h2>
+          <p>A private, offline-capable Islamic remembrance companion for the web.</p>
+        </div>
+        <div class="project-grid">
+          <article class="project-detail"><span class="project-index">01 / COUNT</span><h3>Digital tasbih</h3><p>Choose an entry, count at your own pace, and optionally set a personal target or review a session later.</p></article>
+          <article class="project-detail"><span class="project-index">02 / PERSONALIZE</span><h3>Tools for everyday use</h3><p>Build collections, customize the experience, set reminders, and keep personal goals and session history together.</p></article>
+          <article class="project-detail"><span class="project-index">03 / YOUR DEVICE</span><h3>Local-first by design</h3><p>Personal records are stored in the browser on the user's device. No account or automatic cloud sync is required.</p></article>
+        </div>
+      </section>
+      <section class="developer-notes" aria-labelledby="building-notes">
+        <div><p class="eyebrow">Product &amp; technology</p><h2 id="building-notes">A practical web app, shaped around its users</h2></div>
+        <div>
+          <p>Dhikr Counter is built as a modern web application with React and TypeScript, and is designed as an installable progressive web app. It combines local data storage with a responsive interface, so core counting tools can remain available offline after the app and its resources have been loaded and cached.</p>
+          <p>The project keeps its purpose clear: it is a personal counting and organization tool, not a religious authority. Optional counts, reminders, and statistics are personal features—not measures of faith or religious worth.</p>
+          <div class="technology-list" aria-label="Project technologies"><span>React</span><span>TypeScript</span><span>Progressive web app</span><span>Local-first storage</span></div>
+        </div>
+      </section>
+      <section class="developer-outro">
+        <div><p class="eyebrow">Explore the project</p><h2>Discover Dhikr Counter</h2><p>Explore the <a href="/features.html">app features</a>, read the <a href="/guides/digital-tasbih.html">digital tasbih guide</a>, or open the counter.</p></div>
+        <a class="developer-button" href="/">Open Dhikr Counter <span aria-hidden="true">↗</span></a>
       </section>
     </main>
     <footer class="site-footer"><nav aria-label="Related pages"><a href="/">Counter</a><a href="/features.html">Features</a><a href="/guides/digital-tasbih.html">Digital tasbih guide</a><a href="/guides/daily-dhikr.html">Daily dhikr guide</a><a href="/privacy.html">Privacy</a></nav><p>Dhikr Counter is a personal remembrance tool, not religious advice.</p></footer>
