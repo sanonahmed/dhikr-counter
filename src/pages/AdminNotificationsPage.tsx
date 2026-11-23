@@ -3,6 +3,14 @@ import { Bell, Bot, CheckCircle2, LoaderCircle, PlugZap, Send, ShieldAlert, Spar
 import { Button, Card, Input, Textarea } from '../components/ui/Primitives';
 import { getNotificationPermission, requestNotificationPermission, showLocalNotification } from '../utils/notifications';
 import {
+  buildNotificationPrompt,
+  DRAFT_BODY_LIMIT,
+  DRAFT_MAX_TOKENS,
+  DRAFT_TITLE_LIMIT,
+  parseAiDraft,
+  type AiDraft,
+} from '../utils/aiDraft';
+import {
   AI_PROVIDER_PRESETS,
   AI_PROVIDER_STORAGE_KEY,
   BUILD_TIME_PROXY_URL,
@@ -18,20 +26,28 @@ import {
   usesServerKey,
   type AiProviderConfig,
   type AiProxyStatus,
+  type AiRequestRoute,
 } from '../utils/aiNotifications';
 
 
-function parseDraft(raw: string): { title: string; body: string } {
-  const cleaned = raw.trim().replaceAll('```json', '').replaceAll('```', '').trim();
-  const parsed = JSON.parse(cleaned) as { title?: unknown; body?: unknown };
-  if (typeof parsed.title !== 'string' || typeof parsed.body !== 'string') throw new Error('AI response needs a title and body. Try again or edit the draft.');
-  return { title: parsed.title.slice(0, 60), body: parsed.body.slice(0, 180) };
+function draftNotice(draft: AiDraft, route: AiRequestRoute): { error: boolean; text: string } {
+  const via = route === 'proxy' ? ' through the app server' : ' directly from this browser';
+  switch (draft.source) {
+    case 'json':
+      return { error: false, text: `Draft ready${via}. Review and edit before sending.` };
+    case 'labeled':
+      // A labelled reply ("Title: ... / Body: ...") is recovered but may be
+      // looser than JSON, so the admin is told where the text came from.
+      return { error: false, text: `The provider answered with labelled text instead of JSON${via}, so the draft was read from it. Review and edit before sending.` };
+    default:
+      return { error: false, text: `The provider answered in plain text${via}, so its whole reply was used as the message. Review and edit before sending.` };
+  }
 }
 
 export const AdminNotificationsPage: React.FC = () => {
   const [config, setConfig] = useState<AiProviderConfig>(() => loadAiProvider());
   const [showKey, setShowKey] = useState(false);
-  const [prompt, setPrompt] = useState('Write a warm, respectful reminder to take a mindful moment for dhikr today.');
+  const [prompt, setPrompt] = useState('A warm reminder to take a mindful moment for dhikr today');
   const [title, setTitle] = useState('A moment for dhikr');
   const [body, setBody] = useState('Take a mindful pause and remember Allah.');
   const [busy, setBusy] = useState<'test' | 'generate' | 'send' | null>(null);
@@ -113,10 +129,15 @@ export const AdminNotificationsPage: React.FC = () => {
     try {
       const result = await requestAiCompletionDetailed(config, mode === 'test'
         ? 'Reply with exactly: Connection successful.'
-        : `Write one concise, respectful Muslim dhikr notification based on: ${prompt.trim() || 'A gentle daily dhikr reminder'}\nReturn only valid JSON with exactly two string fields: {"title":"...","body":"..."}. Title under 50 characters, body under 140. Do not invent Quran or hadith quotations or claim a religious source.`, mode === 'test' ? 30 : 180);
+        : buildNotificationPrompt(prompt), mode === 'test' ? 30 : DRAFT_MAX_TOKENS);
       const via = result.route === 'proxy' ? ' through the app server' : ' directly from this browser';
       if (mode === 'test') setNotice({ error: false, text: `Connected${via}. Provider responded: ${result.content.slice(0, 120)}` });
-      else { const draft = parseDraft(result.content); setTitle(draft.title); setBody(draft.body); setNotice({ error: false, text: `Draft ready${via}. Review and edit before sending.` }); }
+      else {
+        const draft = parseAiDraft(result.content);
+        setTitle(draft.title);
+        setBody(draft.body);
+        setNotice(draftNotice(draft, result.route));
+      }
     } catch (error) { setNotice({ error: true, text: error instanceof Error ? error.message : 'AI provider request failed.' }); }
     finally { setBusy(null); }
   };
@@ -188,8 +209,8 @@ export const AdminNotificationsPage: React.FC = () => {
       <label className="block space-y-1.5 text-xs font-medium">What should it say?<Textarea rows={2} maxLength={500} value={prompt} onChange={(e) => setPrompt(e.target.value)} /></label>
       <Button variant="secondary" disabled={busy !== null || !canRequest} onClick={() => void providerAction('generate')}>{busy === 'generate' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Generate with AI</Button>
       <div className="space-y-4 rounded-xl border border-[var(--border-subtle)] p-4">
-        <label className="block space-y-1.5 text-xs font-medium">Notification title<Input maxLength={60} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
-        <label className="block space-y-1.5 text-xs font-medium">Message<Textarea rows={3} maxLength={180} value={body} onChange={(e) => setBody(e.target.value)} /></label>
+        <label className="block space-y-1.5 text-xs font-medium">Notification title<Input maxLength={DRAFT_TITLE_LIMIT} value={title} onChange={(e) => setTitle(e.target.value)} /></label>
+        <label className="block space-y-1.5 text-xs font-medium">Message<Textarea rows={3} maxLength={DRAFT_BODY_LIMIT} value={body} onChange={(e) => setBody(e.target.value)} /></label>
         <Button disabled={busy !== null || !title.trim() || !body.trim()} onClick={() => void send()}>{busy === 'send' ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <><Bell className="h-4 w-4" /><Send className="h-4 w-4" /></>}Send to this device</Button>
       </div>
     </Card>

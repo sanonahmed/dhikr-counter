@@ -50,6 +50,17 @@ ends the session, and the **Lock** button in the panel ends it immediately.
 
 ---
 
+## Draft generation
+
+"Generate with AI" asks the provider for `{"title":"...","body":"..."}`. Replies
+are recovered even when a model ignores that contract: a fenced object, leading
+prose, typographic quotes, and an object cut off by the token limit all still
+yield a draft, and a plain-text answer becomes the message body instead of a
+`JSON.parse` error. The panel states which form was used, so a provider that did
+not return JSON is obvious before you send anything.
+
+---
+
 ## How the security works
 
 - **Server-authoritative.** `src/pages/AdminPage.tsx` only renders the studio
@@ -74,6 +85,7 @@ ends the session, and the **Lock** button in the panel ends it immediately.
 
 ```bash
 npm run dev               # Vite :3000 + server.js :8787
+npm test                  # unit tests, including the AI draft parser
 npm run test:proxy        # end-to-end proxy, auth, and rate-limit checks
 ```
 
