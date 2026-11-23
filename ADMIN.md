@@ -16,16 +16,19 @@ Add the passcode to the environment of the **Node service** (`server.js`):
 | `ADMIN_PASSCODE` | yes | The passcode that unlocks the panel. Unset ⇒ the panel is disabled. |
 | `ADMIN_SESSION_HOURS` | no | How long a login lasts. Default `12`, maximum `168` (one week). |
 | `DATABASE_URL` | yes for push | PostgreSQL connection string (Neon recommended); the service runs `migrations/001_push_subscriptions.sql` automatically when it connects. |
-| `AI_API_KEY` / `GEMINI_API_KEY` | no | Provider key used by the server-side AI relay. |
-| `AI_BASE_URL`, `AI_MODEL` | no | OpenAI-compatible endpoint and model used by that relay. |
+| `AI_API_KEY` / `GEMINI_API_KEY` | no for admin; required for AI Talk | Provider key used by server-side AI features. |
+| `AI_BASE_URL` | no | Optional OpenAI-compatible provider base URL; defaults to Gemini. The server adds `/chat/completions`. |
+| `AI_MODEL` | no | Optional model id; defaults to `gemini-2.5-flash`. |
 | `VITE_AI_PROXY_URL` | static hosting | Build-time URL of the Node service, so the panel knows where to sign in. |
 
 The server-side AI settings above also power the public **AI Talk** companion in
-the app header. AI Talk never accepts a provider URL or key from the browser. It
-uses the same configured provider/model with a Bangla-first system prompt, a
-12-message history limit, and a per-IP limit of 8 requests per 10 minutes. If the
-server has no key configured, the overlay shows a setup message instead of
-calling the provider.
+the app header. AI Talk is voice-only: people speak through the microphone, see
+the conversation transcript, and hear each reply read aloud. It never accepts a
+provider URL or key from the browser. It uses the same configured provider/model
+with a Bangla-first system prompt, a 12-message history limit, and a per-IP limit
+of 8 requests per 10 minutes. `AI_API_KEY` (or `GEMINI_API_KEY`) is required for
+AI Talk; `AI_BASE_URL` and `AI_MODEL` are optional overrides. If the server has no
+key configured, the overlay shows a setup message instead of calling the provider.
 
 Locally: put them in `.env.local` and run `npm run dev`. On Render: add them to
 the web service (the blueprint already lists `ADMIN_PASSCODE`), then redeploy.

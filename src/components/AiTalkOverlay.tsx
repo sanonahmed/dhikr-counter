@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bot, LoaderCircle, Mic, MicOff, Plus, Send, Volume2, VolumeX, X } from 'lucide-react';
+import { Bot, LoaderCircle, Mic, MicOff, Plus, Volume2, VolumeX, X } from 'lucide-react';
 import type { Language } from '../types/dhikr';
 import { getTranslations } from '../i18n/translations';
 import { resolveAdminServerUrl } from '../utils/adminSession';
@@ -7,8 +7,8 @@ import { cn } from '../utils/cn';
 
 interface AiTalkOverlayProps { open: boolean; onClose: () => void; language: Language; }
 interface ChatMessage { role: 'user' | 'assistant'; content: string; id: number; }
-interface SpeechRecognitionResultLike { transcript: string; }
-interface SpeechRecognitionEventLike { results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>; }
+interface SpeechRecognitionResultLike { transcript: string; isFinal?: boolean; }
+interface SpeechRecognitionEventLike { resultIndex?: number; results: ArrayLike<ArrayLike<SpeechRecognitionResultLike>>; }
 interface SpeechRecognitionErrorLike { error: string; }
 interface SpeechRecognitionLike {
   lang: string; interimResults: boolean; maxAlternatives: number;
@@ -27,13 +27,13 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [draft, setDraft] = useState('');
   const [busy, setBusy] = useState(false);
   const [listening, setListening] = useState(false);
+  const [interim, setInterim] = useState('');
   const [voiceError, setVoiceError] = useState('');
   const [requestError, setRequestError] = useState('');
   const [speakingId, setSpeakingId] = useState<number | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const micRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const nextMessageId = useRef(1);
@@ -44,7 +44,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     document.body.style.overflow = 'hidden';
     const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') closeRef.current(); };
     window.addEventListener('keydown', onKeyDown);
-    window.setTimeout(() => inputRef.current?.focus(), 0);
+    window.setTimeout(() => micRef.current?.focus(), 0);
     return () => {
       document.body.style.overflow = previousOverflow;
       window.removeEventListener('keydown', onKeyDown);
@@ -52,13 +52,14 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
       recognitionRef.current = null;
       window.speechSynthesis?.cancel();
       setListening(false);
+      setInterim('');
       setSpeakingId(null);
     };
   }, [open]);
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages, busy, listening]);
+  }, [messages, busy, listening, interim]);
 
   if (!open) return null;
 
@@ -66,23 +67,33 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setListening(false);
+    setInterim('');
   };
 
   const startListening = () => {
     const speechWindow = window as SpeechRecognitionWindow;
     const Recognition = speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
     setVoiceError('');
+    window.speechSynthesis?.cancel();
+    setSpeakingId(null);
     if (!Recognition) { setVoiceError(t.unavailable); return; }
     try {
       const recognition = new Recognition();
       recognition.lang = replyLanguage === 'bn' ? 'bn-BD' : 'en-US';
-      recognition.interimResults = false;
+      recognition.interimResults = true;
       recognition.maxAlternatives = 1;
       recognition.onresult = (event) => {
-        const transcript = event.results[event.results.length - 1]?.[0]?.transcript?.trim();
-        if (transcript) {
-          void sendMessage(transcript, true);
+        let finalTranscript = '';
+        let interimTranscript = '';
+        for (let index = event.resultIndex ?? 0; index < event.results.length; index += 1) {
+          const result = event.results[index];
+          const transcript = result?.[0]?.transcript?.trim();
+          if (!transcript) continue;
+          if (result[0].isFinal === false) interimTranscript += `${transcript} `;
+          else finalTranscript += `${transcript} `;
         }
+        setInterim(interimTranscript.trim());
+        if (finalTranscript.trim()) void askAssistant(finalTranscript.trim());
       };
       recognition.onerror = (event) => {
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') setVoiceError(t.micDenied);
@@ -90,7 +101,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
         else if (event.error === 'network') setVoiceError(t.networkError);
         else setVoiceError(t.voiceError);
       };
-      recognition.onend = () => { recognitionRef.current = null; setListening(false); };
+      recognition.onend = () => { recognitionRef.current = null; setListening(false); setInterim(''); };
       recognitionRef.current = recognition;
       setListening(true);
       recognition.start();
@@ -101,13 +112,12 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     }
   };
 
-  const sendMessage = async (content = draft, fromVoice = false) => {
+  const askAssistant = async (content: string) => {
     const text = content.trim();
     if (!text || busy || text.length > 1200) return;
     stopListening();
     window.speechSynthesis?.cancel();
     setSpeakingId(null);
-    setDraft('');
     setRequestError('');
     const userMessage: ChatMessage = { role: 'user', content: text, id: nextMessageId.current++ };
     const nextMessages = [...messages, userMessage];
@@ -135,14 +145,14 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
       if (!answer) throw new Error(t.requestError);
       const answerId = nextMessageId.current++;
       setMessages((current) => [...current, { role: 'assistant', content: answer, id: answerId }]);
-      if (fromVoice) speak({ role: 'assistant', content: answer, id: answerId });
+      speak({ role: 'assistant', content: answer, id: answerId });
     } catch (error) {
       const message = error instanceof Error ? error.message : '';
       const timedOut = error instanceof Error && error.name === 'TimeoutError';
       setRequestError(!message || message === 'Failed to fetch' || timedOut || /timed out/i.test(message) ? t.requestError : message);
     } finally {
       setBusy(false);
-      inputRef.current?.focus();
+      micRef.current?.focus();
     }
   };
 
@@ -170,11 +180,11 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     window.speechSynthesis?.cancel();
     setSpeakingId(null);
     setMessages([]);
-    setDraft('');
     setRequestError('');
     setVoiceError('');
+    setInterim('');
     nextMessageId.current = 1;
-    inputRef.current?.focus();
+    micRef.current?.focus();
   };
 
   return (
@@ -228,17 +238,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
             <div className="mx-auto flex max-w-md flex-col items-center py-8 text-center">
               <span className="mb-4 flex h-14 w-14 items-center justify-center rounded-3xl bg-[var(--accent-soft)] text-[var(--accent-primary)]"><Bot className="h-7 w-7" /></span>
               <p className="text-sm leading-relaxed text-[var(--text-primary)]">{t.welcome}</p>
-              <div className="mt-6 flex flex-wrap justify-center gap-2">
-                {t.prompts.map((prompt) => (
-                  <button
-                    key={prompt}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void sendMessage(prompt)}
-                    className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--bg-canvas)] px-3 py-2 text-left text-xs leading-relaxed text-[var(--text-secondary)] hover:border-[var(--accent-primary)] hover:text-[var(--accent-primary)] disabled:opacity-50"
-                  >{prompt}</button>
-                ))}
-              </div>
+              <p className="mt-3 text-xs leading-relaxed text-[var(--text-muted)]">{t.voiceOnly}</p>
             </div>
           )}
 
@@ -271,46 +271,27 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
             </div>
           )}
           {requestError && <p role="alert" className="rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs leading-relaxed text-red-700 dark:text-red-300">{requestError}</p>}
-          {listening && <p className="text-center text-xs text-[var(--accent-primary)]" role="status">{t.listening}</p>}
+          {interim && (
+            <div className="flex justify-end">
+              <div className="max-w-[88%] rounded-2xl rounded-br-md border border-[var(--accent-primary)]/60 bg-[var(--accent-primary)]/10 px-4 py-3 text-sm leading-relaxed text-[var(--text-primary)] [overflow-wrap:anywhere]">{interim}</div>
+            </div>
+          )}
+          {listening && !interim && <p className="text-center text-xs text-[var(--accent-primary)]" role="status">{t.listening}</p>}
         </div>
 
-
         <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pb-safe pt-3 sm:px-5">
-          <form
-            onSubmit={(event) => { event.preventDefault(); void sendMessage(); }}
-            className="flex items-end gap-2"
-          >
+          <div className="flex flex-col items-center gap-2 pb-3">
             <button
+              ref={micRef}
               type="button"
               onClick={listening ? stopListening : startListening}
               disabled={busy}
               aria-label={listening ? t.stopListening : t.startListening}
               title={listening ? t.stopListening : t.startListening}
-              className={cn('mb-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl transition-colors disabled:opacity-45', listening ? 'bg-red-600 text-white' : 'bg-[var(--accent-soft)] text-[var(--accent-primary)] hover:opacity-80')}
-            >{listening ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}</button>
-            <textarea
-              ref={inputRef}
-              value={draft}
-              onChange={(event) => setDraft(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter' && !event.shiftKey) {
-                  event.preventDefault();
-                  void sendMessage();
-                }
-              }}
-              maxLength={1200}
-              rows={1}
-              placeholder={t.placeholder}
-              aria-label={t.placeholder}
-              className="max-h-32 min-h-11 flex-1 resize-y rounded-xl border border-[var(--border-strong)] bg-[var(--bg-canvas)] px-3.5 py-3 text-sm leading-relaxed text-[var(--text-primary)] placeholder:text-[var(--text-muted)] focus:border-[var(--accent-primary)] focus:outline-none"
-            />
-            <button
-              type="submit"
-              disabled={busy || !draft.trim()}
-              aria-label={t.send}
-              className="mb-0.5 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
-            >{busy ? <LoaderCircle className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}</button>
-          </form>
+              className={cn('inline-flex h-16 w-16 items-center justify-center rounded-full shadow-lg transition-all disabled:cursor-wait disabled:opacity-60', listening ? 'animate-pulse bg-red-600 text-white ring-4 ring-red-500/20' : 'bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] hover:scale-105')}
+            >{listening ? <MicOff className="h-7 w-7" /> : busy ? <LoaderCircle className="h-7 w-7 animate-spin" /> : <Mic className="h-7 w-7" />}</button>
+            <p className="text-center text-xs text-[var(--text-secondary)]">{busy ? t.thinking : listening ? t.stopListening : messages.length > 0 ? t.tapToReply : t.tapToSpeak}</p>
+          </div>
           <div className="flex items-start justify-between gap-3 py-2">
             <p className="max-w-xl text-[10px] leading-relaxed text-[var(--text-muted)]">{t.disclaimer}</p>
             <button

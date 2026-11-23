@@ -16,7 +16,7 @@ An offline-first, modern Progressive Web App (PWA) for Islamic Dhikr, Durood, Is
 - **Statistics & History**: Detailed analytics, streak history, charts, and milestones.
 - **Data Backup & Restore**: Export and import your dhikr history and custom adhkars seamlessly.
 - **Customization Studio**: Multiple visual themes, bead styles, dial animations, and font settings.
-- **AI Talk**: A Bangla-first companion for discussing prayer and dhikr, with voice input and spoken replies in supported browsers.
+- **AI Talk**: A Bangla-first voice companion for discussing prayer and dhikr — speak with the microphone, hear each reply read aloud, and keep the transcript on screen.
 
 ---
 
@@ -95,10 +95,11 @@ The blueprint creates a **Node web service** (`npm start`), not a static site, b
    - **Health Check Path**: `/api/health`
 4. Add environment variables under **Environment**:
    - `ADMIN_PASSCODE` — the passcode that unlocks the hidden admin panel
-   - `AI_API_KEY` (or `GEMINI_API_KEY`) - optional provider key used by the server
-   - `AI_BASE_URL` - for example `https://generativelanguage.googleapis.com/v1beta/openai` or `https://api.openai.com/v1`
-   - `AI_MODEL` - for example `gemini-2.5-flash` or `gpt-4o-mini`
+   - `AI_API_KEY` (or `GEMINI_API_KEY`) — **required for AI Talk**; the provider key the server uses
+   - `AI_BASE_URL` — optional; defaults to the Gemini OpenAI-compatible endpoint. Set it (for example `https://api.openai.com/v1`) to use another OpenAI-compatible provider
+   - `AI_MODEL` — optional; defaults to `gemini-2.5-flash`. Set the exact model id your provider expects
 5. Click **Create Web Service**.
+6. Open `/api/health` once the deploy finishes: `ai.serverKeyConfigured` must be `true` for AI Talk to answer.
 
 ### Static hosting only
 A static site can host the public app, but the admin panel and its AI relay need
