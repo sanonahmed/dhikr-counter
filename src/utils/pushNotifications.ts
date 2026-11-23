@@ -17,6 +17,26 @@ const PUSH_UNSUBSCRIBE_ENDPOINT = '/api/push/unsubscribe';
 const ADMIN_PUSH_ENDPOINT = '/api/admin/push';
 const REQUEST_TIMEOUT_MS = 15_000;
 const SERVICE_WORKER_TIMEOUT_MS = 20_000;
+const PUSH_OPT_OUT_KEY = 'dhikr-counter-push-opt-out';
+
+export function hasOptedOutOfPushNotifications(): boolean {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(PUSH_OPT_OUT_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function setPushOptOut(optedOut: boolean): void {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      if (optedOut) localStorage.setItem(PUSH_OPT_OUT_KEY, 'true');
+      else localStorage.removeItem(PUSH_OPT_OUT_KEY);
+    }
+  } catch {
+    // A storage restriction must not prevent a user from managing notifications.
+  }
+}
 
 const SERVER_UNREACHABLE =
   'Could not reach the app server. A broadcast needs server.js (npm run dev or npm start), or VITE_AI_PROXY_URL pointing at that service.';
@@ -27,6 +47,7 @@ export type PushRegistrationResult =
   | 'subscribed'
   | 'unsupported'
   | 'permission-denied'
+  | 'opted-out'
   /** The server has no stable VAPID keys or no PostgreSQL store configured. */
   | 'disabled'
   | 'unavailable';
@@ -183,14 +204,18 @@ async function fetchServerReady(): Promise<boolean | null> {
  * row is refreshed after a redeploy or key change. Returns 'disabled' when the
  * server has no stable keys/database instead of pretending it worked.
  */
-export async function registerPushDevice(): Promise<PushRegistrationResult> {
+export async function registerPushDevice(
+  { userInitiated = false }: { userInitiated?: boolean } = {}
+): Promise<PushRegistrationResult> {
   if (!pushSupported()) return 'unsupported';
   if (getNotificationPermission() !== 'granted') return 'permission-denied';
+  if (!userInitiated && hasOptedOutOfPushNotifications()) return 'opted-out';
 
   try {
     const config = await fetchPushConfig();
     if (!config.enabled) return 'disabled';
 
+    if (userInitiated) setPushOptOut(false);
     const registration = await readyRegistration();
     let subscription = await registration.pushManager.getSubscription();
 
@@ -255,7 +280,10 @@ export async function unsubscribePushDevice(): Promise<boolean> {
   try {
     const registration = await readyRegistration();
     const subscription = await registration.pushManager.getSubscription();
-    if (!subscription) return true;
+    if (!subscription) {
+      setPushOptOut(true);
+      return true;
+    }
 
     const json = subscription.toJSON();
     const { response } = await requestJson(PUSH_UNSUBSCRIBE_ENDPOINT, {
@@ -265,7 +293,9 @@ export async function unsubscribePushDevice(): Promise<boolean> {
     });
 
     if (!response.ok) return false;
-    return await subscription.unsubscribe();
+    const removedLocally = await subscription.unsubscribe();
+    if (removedLocally) setPushOptOut(true);
+    return removedLocally;
   } catch {
     return false;
   }

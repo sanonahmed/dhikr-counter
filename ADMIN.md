@@ -88,11 +88,43 @@ The studio's **Broadcast to all devices** button sends one Web Push message to
 every device that has registered with the Node service. Delivery works while the
 app is closed because the service worker shows the notification.
 
-A device registers automatically when it opens the app **and** notification
-permission is already granted. Users who have not allowed notifications yet
-register the first time they press **Enable notifications** or **Test
-notification** on the Reminders page. iOS also requires the PWA to be installed
-on the home screen (iOS 16.4+) before it can receive push.
+On the first visit, the app shows an in-app notification explainer. Its
+**Allow notifications** button opens the browser's native permission prompt (a
+user tap is required by browsers), then registers the device. A device also
+registers automatically whenever it opens the app **and** notification permission
+is already granted. Users who decline can still enable notifications from the
+Reminders page.
+
+Turning off notifications in the app stores an opt-out on that device, so the
+next launch asks again instead of silently re-registering it. If the browser or
+device itself has blocked notifications, the browser will not show its native
+prompt again; the app shows instructions for restoring the permission in
+browser/device settings and offers **check again**. iOS also requires the PWA to
+be installed on the home screen (iOS 16.4+) before it can receive push.
+
+### Notification banners (pop-up on screen)
+
+Broadcasts are sent with high push urgency, and the service worker asks for a
+persistent, vibrating notification. These are requests: whether a notification
+appears as a banner on screen or only in the notification shade/center is
+controlled by the operating system and the browser, not by the web page. If
+messages only appear in the notification bar, enable banners for this app:
+
+- **Android:** press and hold one of its notifications → **Settings**, or open
+  **Settings → Apps → Dhikr Counter → Notifications** (for a browser tab:
+  **Chrome → Settings → Notifications → this site**) and set the channel to
+  **Urgent** / **Pop on screen**, with sound and vibration allowed.
+- **Windows:** **Settings → System → Notifications → Chrome** (or **Dhikr
+  Counter**) → enable **Show notification banners**, and turn off Focus assist /
+  Do Not Disturb.
+- **macOS:** **System Settings → Notifications → Chrome** (or **Dhikr
+  Counter**) → choose **Banners** or **Alerts** instead of None, and turn off
+  Focus.
+- **iOS:** **Settings → Notifications → Dhikr Counter** → allow notifications
+  and choose **Banners** or **Alerts**, and turn off Focus.
+
+When an app window is visible, it also shows its own in-app banner, so the
+message is visible even if the operating system suppresses the native pop-up.
 
 Required on the Node service:
 

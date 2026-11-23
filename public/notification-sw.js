@@ -27,15 +27,44 @@ self.addEventListener('push', (event) => {
   const title = typeof payload.title === 'string' && payload.title.trim()
     ? payload.title.trim().slice(0, 120)
     : 'Dhikr Counter';
+  const tag = typeof payload.tag === 'string' ? payload.tag.slice(0, 120) : '';
   const options = {
     body: typeof payload.body === 'string' ? payload.body.slice(0, 1000) : '',
     icon: localUrl(payload.icon, '/pwa-192x192.png'),
     badge: localUrl(payload.badge, '/pwa-192x192.png'),
-    tag: typeof payload.tag === 'string' ? payload.tag.slice(0, 120) : undefined,
+    requireInteraction: true,
+    silent: false,
+    vibrate: [200, 100, 200],
     data: { url: localUrl(payload.url, '/') },
+    // `renotify` is valid only together with a non-empty tag; otherwise Chrome
+    // rejects showNotification().
+    ...(tag ? { tag, renotify: true } : {}),
   };
 
-  event.waitUntil(self.registration.showNotification(title, options));
+  // Show the native notification when the app is closed/backgrounded, and also
+  // surface an in-app banner in any open app window. The OS still controls
+  // whether a native heads-up banner is allowed by the user's notification settings.
+  event.waitUntil(Promise.all([
+    self.registration.showNotification(title, options),
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      for (const client of clients) {
+        // A hidden/background window would deliver a stale banner when the user
+        // returns; the native notification already covers that case.
+        if (client.visibilityState !== 'visible') continue;
+        try {
+          client.postMessage({
+            type: 'PUSH_NOTIFICATION',
+            title,
+            body: options.body,
+            url: options.data.url,
+            tag: options.tag,
+          });
+        } catch {
+          // A window can close between matchAll() and postMessage().
+        }
+      }
+    }),
+  ]));
 });
 
 self.addEventListener('notificationclick', (event) => {

@@ -154,6 +154,7 @@ test('delivery prunes expired endpoints and normalizes unsafe notification URLs'
       async sendNotification(subscription, payload, options) {
         assert.equal(JSON.parse(payload).url, '/');
         assert.equal(options.TTL, 3600);
+        assert.equal(options.urgency, 'high');
         if (subscription.endpoint === expired.endpoint) throw Object.assign(new Error('gone'), { statusCode: 410 });
       },
     });

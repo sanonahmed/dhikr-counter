@@ -101,6 +101,9 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
     if (result === 'permission-denied') {
       return 'This browser has not granted notification permission, so the device was not registered.';
     }
+    if (result === 'opted-out') {
+      return 'Notifications were turned off on this device. Enable them to receive broadcasts again.';
+    }
     return 'This device could not register for admin broadcasts. Check the server connection and try again.';
   };
 
@@ -117,7 +120,7 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
         );
         return;
       }
-      const pushResult = await registerPushDevice();
+      const pushResult = await registerPushDevice({ userInitiated: true });
       await refreshDeviceState();
       setStatusMessage(`Notifications are enabled. ${await registrationOutcome(pushResult)}`);
     } catch {
@@ -169,7 +172,7 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
         return;
       }
 
-      const pushResult = await registerPushDevice();
+      const pushResult = await registerPushDevice({ userInitiated: true });
       await refreshDeviceState();
       await showLocalNotification('Dhikr Counter', {
         body: 'Assalamu Alaikum — your local notifications are working.',
@@ -274,7 +277,9 @@ export const RemindersPage: React.FC<RemindersPageProps> = ({ language, reminder
           <div className="text-xs text-[var(--text-secondary)]">
             <p>Web Push device: <strong className="capitalize text-[var(--text-primary)]">{deviceState?.subscribed ? 'registered' : deviceState?.supported ? 'not registered' : 'unsupported'}</strong></p>
             <p className="mt-1">Push service: <strong className="capitalize text-[var(--text-primary)]">{deviceState?.serverReady === null ? 'unavailable' : deviceState?.serverReady ? 'ready' : 'not configured'}</strong></p>
-            {deviceState?.permission === 'denied' && <p className="mt-1">Permission is blocked in browser settings; change it there before enabling push.</p>}
+            {deviceState?.permission === 'denied' && (
+              <p className="mt-1">{t.reminders.permissionBlockedInstructions}</p>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             {deviceState?.subscribed ? (

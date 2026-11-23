@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { registerSW } from 'virtual:pwa-register';
-import { registerPushDevice } from '../utils/pushNotifications';
+import { hasOptedOutOfPushNotifications, registerPushDevice } from '../utils/pushNotifications';
 
 interface BeforeInstallPromptEvent extends Event {
   prompt: () => Promise<void>;
@@ -35,8 +35,9 @@ export function usePWAInstall() {
 
     // Devices that already allowed notifications re-register on every launch,
     // so the server's broadcast list repopulates after a restart or redeploy.
-    // registerPushDevice() does nothing until permission is granted.
-    void registerPushDevice();
+    // Re-register granted devices unless the user chose Disable Web Push.
+    // Opted-out devices are prompted by NotificationPermissionPrompt instead.
+    if (!hasOptedOutOfPushNotifications()) void registerPushDevice();
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();

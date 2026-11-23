@@ -9,8 +9,11 @@ export function getNotificationPermission(): NotificationPermissionState {
 }
 
 export async function requestNotificationPermission(): Promise<NotificationPermissionState> {
-  if (getNotificationPermission() === 'unsupported') {
-    return 'unsupported';
+  const currentPermission = getNotificationPermission();
+  if (currentPermission === 'unsupported' || currentPermission === 'denied') {
+    // Browsers will not show the native prompt again after denial; the user must
+    // change this site's permission in browser/device settings first.
+    return currentPermission;
   }
 
   return Notification.requestPermission();
@@ -34,11 +37,17 @@ export async function showLocalNotification(
     );
   }
 
-  const options: NotificationOptions = {
+  // `vibrate` and `renotify` are supported by Chrome/Firefox but are missing
+  // from the DOM typings.
+  const options: NotificationOptions & { vibrate?: number[]; renotify?: boolean } = {
     body,
     icon: '/pwa-192x192.png',
     badge: '/pwa-192x192.png',
     tag,
+    requireInteraction: true,
+    silent: false,
+    vibrate: [200, 100, 200],
+    renotify: Boolean(tag),
     data: { url: '/' },
   };
 
