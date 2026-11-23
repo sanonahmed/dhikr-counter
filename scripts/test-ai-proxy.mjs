@@ -32,7 +32,7 @@ const child = spawn(process.execPath, ['server.js'], {
     AI_API_KEY: 'test-key',
     AI_BASE_URL: `http://127.0.0.1:${providerPort}/v1`,
     AI_MODEL: 'mock-model',
-    AI_ALLOWED_HOSTS: '',
+    AI_ALLOWED_HOSTS: 'api.allowed.example',
     AI_PROXY_ORIGINS: 'https://frontend.example',
   },
   stdio: ['ignore', 'pipe', 'pipe'],
@@ -112,6 +112,32 @@ try {
     body: JSON.stringify({ baseUrl: 'http://example.com/v1', apiKey: 'k', model: 'm', prompt: 'Hi' }),
   });
   check('non-https rejected', nonHttps.status === 400, `${nonHttps.status} ${(await nonHttps.json()).error}`);
+
+  const blockedHost = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseUrl: 'https://api.custom-llm.example/v1', apiKey: 'k', model: 'm', prompt: 'Hi' }),
+  });
+  const blockedData = await blockedHost.json();
+  check(
+    'unlisted custom host is refused with its host name',
+    blockedHost.status === 400 && blockedData.code === 'host_not_allowed' && blockedData.host === 'api.custom-llm.example' && /AI_ALLOWED_HOSTS/.test(blockedData.error),
+    `${blockedHost.status} ${JSON.stringify(blockedData)}`
+  );
+
+  // An allowlisted host clears the guard and only then fails at the network
+  // layer, which proves AI_ALLOWED_HOSTS is what admits a custom provider.
+  const allowlistedHost = await fetch(`${base}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ baseUrl: 'https://api.allowed.example/v1', apiKey: 'k', model: 'm', prompt: 'Hi' }),
+  });
+  const allowlistedData = await allowlistedHost.json();
+  check(
+    'AI_ALLOWED_HOSTS admits a custom host',
+    allowlistedHost.status === 502 && /Could not reach the AI provider/.test(allowlistedData.error),
+    `${allowlistedHost.status} ${JSON.stringify(allowlistedData)}`
+  );
 
   const emptyPrompt = await fetch(`${base}/api/ai/chat`, {
     method: 'POST',

@@ -83,7 +83,7 @@ export const AI_PROVIDER_PRESETS: AiProviderPreset[] = [
     label: 'Custom OpenAI-compatible',
     baseUrl: '',
     model: '',
-    note: 'Any provider exposing POST /chat/completions.',
+    note: 'Custom hosts used through the proxy must be added to AI_ALLOWED_HOSTS; direct requests need provider CORS support.',
   },
 ];
 
@@ -215,6 +215,20 @@ function proxyDownMessage(status: number, endpoint: string): string {
 }
 
 /**
+ * The proxy refused a custom base URL because the host is not on its allowlist
+ * (AI_ALLOWED_HOSTS). Carries the host so the caller can explain the fix.
+ */
+class ProxyHostBlockedError extends Error {
+  readonly host: string;
+
+  constructor(host: string, message: string) {
+    super(message);
+    this.name = 'ProxyHostBlockedError';
+    this.host = host;
+  }
+}
+
+/**
  * Sends the request through server.js. Returns null when no proxy is
  * reachable (static hosting), so the caller can fall back to a direct call.
  */
@@ -261,6 +275,12 @@ async function requestViaProxy(config: AiProviderConfig, prompt: string, maxToke
       }
       return null;
     }
+    if (data.code === 'host_not_allowed') {
+      throw new ProxyHostBlockedError(
+        typeof data.host === 'string' && data.host ? data.host : hostOf(config.baseUrl),
+        message || `The AI proxy is not allowed to call ${hostOf(config.baseUrl)}.`
+      );
+    }
     throw new Error(message || `The AI proxy failed (${response.status}).`);
   }
   const content = typeof data.content === 'string' ? data.content.trim() : '';
@@ -291,6 +311,19 @@ function providerBlocksBrowserMessage(host: string, proxyEndpoint: string): stri
     `${host} does not allow browser requests, and no AI proxy answered ${proxyEndpoint}, so this request cannot succeed ` +
     'from the page. Switch to a provider that allows browser requests (Google Gemini or OpenRouter), or serve the app with ' +
     'server.js / enter a deployed copy of it in "AI proxy URL".'
+  );
+}
+
+/**
+ * A custom provider host the proxy will not relay. Many OpenAI-compatible
+ * providers do send CORS headers, so the caller tries the browser request
+ * before falling back to this message.
+ */
+function hostNotAllowedMessage(host: string, detail: string, proxyEndpoint: string): string {
+  return (
+    `The AI proxy at ${proxyEndpoint} is not allowed to call ${host}. Add ${host} to AI_ALLOWED_HOSTS ` +
+    `(put AI_ALLOWED_HOSTS=${host} on its own line in .env.local, or add the variable to your host's environment ` +
+    `settings) and restart the server. ${detail}`
   );
 }
 
@@ -344,7 +377,23 @@ export async function requestAiCompletionDetailed(
   // Validate the URL before touching the network so mistakes fail fast.
   buildChatEndpoint(config.baseUrl);
 
-  const proxied = await requestViaProxy(config, prompt, maxTokens);
+  let proxied: string | null;
+  try {
+    proxied = await requestViaProxy(config, prompt, maxTokens);
+  } catch (error) {
+    if (!(error instanceof ProxyHostBlockedError)) throw error;
+    // The proxy refuses this custom host. The provider may still accept a
+    // browser request, so try it before telling the user what to allowlist.
+    try {
+      return { content: await requestDirect(config, prompt, maxTokens), route: 'direct' };
+    } catch (directError) {
+      const detail = directError instanceof Error ? directError.message : '';
+      const suffix = detail.includes('cross-origin (CORS)')
+        ? 'Sending the request straight from this browser failed too, because the provider blocks browser requests.'
+        : `Sending the request straight from this browser failed too: ${detail}`;
+      throw new Error(hostNotAllowedMessage(error.host, suffix, resolveProxyEndpoints(config.proxyUrl).chat));
+    }
+  }
   if (proxied !== null) return { content: proxied, route: 'proxy' };
 
   // Skip a direct call that the provider is guaranteed to block in the browser.

@@ -48,7 +48,28 @@ const TRUSTED_PROVIDER_HOSTS = new Set([
   'api.deepseek.com',
   'api.mistral.ai',
   'api.together.xyz',
+  // Other commonly used OpenAI-compatible endpoints. Anything outside this
+  // list must be named in AI_ALLOWED_HOSTS, so the endpoint cannot be pointed
+  // at arbitrary servers.
+  'api.x.ai',
+  'api.cerebras.ai',
+  'api.fireworks.ai',
+  'api.moonshot.ai',
+  'api.moonshot.cn',
+  'api.novita.ai',
+  'api.sambanova.ai',
+  'api.perplexity.ai',
+  'api.hyperbolic.xyz',
+  'api.anthropic.com',
 ]);
+
+/** Error carrying a machine-readable reason, so the UI can react precisely. */
+function proxyConfigError(message, code, extra = {}) {
+  const error = new Error(message);
+  error.code = code;
+  Object.assign(error, extra);
+  return error;
+}
 
 function configuredProviderHost() {
   try {
@@ -101,7 +122,11 @@ function assertAllowedProviderUrl(url) {
     throw new Error('The provider URL must be a public host.');
   }
   if (!isAllowedProviderHost(url.hostname)) {
-    throw new Error('That host is not an allowed AI provider. Add it to the AI_ALLOWED_HOSTS environment variable to permit it.');
+    throw proxyConfigError(
+      `The AI proxy is not allowed to call ${url.hostname}. Add AI_ALLOWED_HOSTS=${url.hostname.toLowerCase()} to the proxy service environment to permit it.`,
+      'host_not_allowed',
+      { host: url.hostname.toLowerCase() }
+    );
   }
 }
 
@@ -215,7 +240,12 @@ app.post('/api/ai/chat', async (req, res) => {
   try {
     endpoint = buildChatEndpoint(baseUrl);
   } catch (error) {
-    res.status(400).json({ error: error instanceof Error ? error.message : 'Invalid provider URL.' });
+    const payload = { error: error instanceof Error ? error.message : 'Invalid provider URL.' };
+    if (error?.code) {
+      payload.code = error.code;
+      if (error.host) payload.host = error.host;
+    }
+    res.status(400).json(payload);
     return;
   }
 

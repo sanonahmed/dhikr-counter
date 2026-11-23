@@ -80,9 +80,9 @@ Configure the proxy with environment variables (see `.env.example`):
 | `AI_API_KEY` | Provider key used by the server. Falls back to `OPENAI_API_KEY`, then `GEMINI_API_KEY`. |
 | `AI_BASE_URL` | OpenAI-compatible base URL. Defaults to Gemini's compatible endpoint when only `GEMINI_API_KEY` is set. |
 | `AI_MODEL` | Default model name. |
-| `AI_ALLOWED_HOSTS` | Comma-separated extra provider hosts the proxy may call. |
+| `AI_ALLOWED_HOSTS` | Comma-separated extra provider hostnames the proxy may call (hostnames only; no scheme or path). Example: `api.deepinfra.com`. |
 
-Only the provider host named in `AI_BASE_URL` (plus a built-in list of common AI hosts) can be called, and the server key is only attached to `AI_BASE_URL`'s host, so the endpoint cannot be used as a general request relay or to leak the key elsewhere.
+Only the provider host named in `AI_BASE_URL` (plus a built-in list of common AI hosts) can be called, and the server key is only attached to `AI_BASE_URL`'s host, so the endpoint cannot be used as a general request relay or to leak the key elsewhere. For a custom browser-configured provider, add its exact hostname to `AI_ALLOWED_HOSTS` on the **Node proxy service** and restart/redeploy it. For example, if its base URL is `https://api.deepinfra.com/v1`, set `AI_ALLOWED_HOSTS=api.deepinfra.com`. Multiple entries are comma-separated. Do not include `https://` or a URL path.
 
 ### Development
 
@@ -103,6 +103,14 @@ Start server.js too (`npm run dev` does both), then verify with `npm run test:pr
 > studio. Keys are stored per origin, so a different port or host starts with
 > empty settings. Note that OpenAI never accepts browser requests, so it always
 > needs a proxy — Google Gemini and OpenRouter do not.
+
+> **"The AI proxy is not allowed to call api.example.com" (custom provider)?** The
+> proxy only relays hosts it knows about, so a custom base URL must be allowlisted
+> on the server. Add the exact hostname (no `https://`, no path) and restart:
+> `AI_ALLOWED_HOSTS=api.example.com` in `.env.local` for `npm run dev`/`npm start`,
+> or as an environment variable on the deployed Node service. Comma-separate
+> several hosts. If the provider sends CORS headers, the studio also retries the
+> request straight from the browser, which needs no allowlist entry.
 
 ---
 
