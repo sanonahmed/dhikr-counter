@@ -13,12 +13,12 @@ export default defineConfig(() => {
       VitePWA({
         // Activate and reload with deployed updates automatically, including installed PWAs.
         registerType: 'autoUpdate',
-        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png'],
+        includeAssets: ['icon.svg', 'apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png', 'pwa-maskable-512x512.png', 'social-preview.png'],
         manifest: {
           id: '/',
           name: 'Dhikr Counter',
           short_name: 'Dhikr',
-          description: 'Offline-first Islamic Dhikr, Durood, Istighfar, and digital Tasbih companion.',
+          description: 'A private, offline-ready digital dhikr counter and tasbih for durood, istighfar, and daily adhkar, with English and Bengali support.',
           theme_color: '#0B4F3A',
           background_color: '#F7F5F0',
           display: 'standalone',

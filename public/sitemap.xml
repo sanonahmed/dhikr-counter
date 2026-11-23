@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
-  <url>
-    <loc>https://dhikr-counter1.onrender.com/</loc>
-  </url>
+  <url><loc>https://dhikr-counter1.onrender.com/</loc></url>
+  <url><loc>https://dhikr-counter1.onrender.com/features.html</loc></url>
+  <url><loc>https://dhikr-counter1.onrender.com/privacy.html</loc></url>
+  <url><loc>https://dhikr-counter1.onrender.com/guides/digital-tasbih.html</loc></url>
+  <url><loc>https://dhikr-counter1.onrender.com/guides/daily-dhikr.html</loc></url>
 </urlset>

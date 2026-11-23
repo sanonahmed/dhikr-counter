@@ -1,4 +1,5 @@
 User-agent: *
 Allow: /
+Disallow: /api/
 
 Sitemap: https://dhikr-counter1.onrender.com/sitemap.xml

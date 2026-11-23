@@ -383,8 +383,8 @@ export const TRANSLATIONS = {
       privacyTitle: 'Your Worship Stays Private',
       privacyPoints: [
         '100% local-first: All counts, custom Dhikr, sessions, and goals stay in your browser IndexedDB.',
-        'No account, login, cloud sync tracking, or third-party analytics.',
-        'Works completely offline once loaded or installed as a PWA.',
+        'No account, login, or automatic cloud sync and no third-party advertising analytics. See the privacy notice for optional online features.',
+        'Core counter features work offline after app resources load and cache; connected services need an internet connection.',
       ],
       authenticityTitle: 'Content Integrity',
       authenticityDesc:
@@ -785,8 +785,8 @@ export const TRANSLATIONS = {
       privacyTitle: 'আপনার ইবাদত সম্পূর্ণ ব্যক্তিগত',
       privacyPoints: [
         '১০০% লোকাল-ফার্স্ট: সমস্ত গণনা, ব্যক্তিগত জিকির ও ইতিহাস আপনার ডিভাইসের IndexedDB-তে সংরক্ষিত থাকে।',
-        'কোনো অ্যাকাউন্ট, লগইন বা তৃতীয় পক্ষের ট্র্যাকিং নেই।',
-        'একবার লোড বা ইনস্টল করলে ইন্টারনেট ছাড়াই সম্পূর্ণভাবে কাজ করে।',
+        'কোনো অ্যাকাউন্ট, লগইন, স্বয়ংক্রিয় ক্লাউড সিঙ্ক বা তৃতীয় পক্ষের বিজ্ঞাপন-ট্র্যাকিং নেই। ঐচ্ছিক অনলাইন সেবা সম্পর্কে জানতে গোপনীয়তা নীতি দেখুন।',
+        'অ্যাপের প্রয়োজনীয় অংশ লোড ও ক্যাশ হওয়ার পরে মূল কাউন্টার অফলাইনে কাজ করে; অনলাইন সেবায় ইন্টারনেট প্রয়োজন।',
       ],
       authenticityTitle: 'বিষয়বস্তুর বিশুদ্ধতা',
       authenticityDesc:

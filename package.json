@@ -14,7 +14,8 @@
     "test:proxy": "node scripts/test-ai-proxy.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist dev-dist",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "seo:check": "node scripts/check-seo.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
