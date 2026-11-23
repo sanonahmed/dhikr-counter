@@ -112,6 +112,14 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Forward AI requests to server.js during development so the same
+      // proxy used in production also works with `npm run dev`.
+      proxy: {
+        '/api': {
+          target: process.env.API_PROXY_TARGET || 'http://localhost:8787',
+          changeOrigin: true,
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

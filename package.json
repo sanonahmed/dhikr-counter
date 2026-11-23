@@ -5,9 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
+    "dev:server": "node --watch server.js",
     "build": "vite build",
+    "start": "node server.js",
+    "serve": "npm run build && node server.js",
+    "test:proxy": "node scripts/test-ai-proxy.mjs",
     "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
+    "clean": "rm -rf dist dev-dist",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
