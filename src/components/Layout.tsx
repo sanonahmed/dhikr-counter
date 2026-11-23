@@ -9,7 +9,6 @@ import {
   Home,
   Info,
   Palette,
-  PenLine,
   Settings,
   Sparkles,
   Heart,
@@ -21,6 +20,7 @@ import type { Language, PageRoute } from '../types/dhikr';
 import { getTranslations } from '../i18n/translations';
 import { cn } from '../utils/cn';
 import { PWAInstallButton } from './PWAInstallBanner';
+import { AiTalkOrb } from './AiTalkOrb';
 import { AiTalkOverlay } from './AiTalkOverlay';
 
 interface LayoutProps {
@@ -306,9 +306,15 @@ export const Layout: React.FC<LayoutProps> = ({
           aria-label={t.nav.aiTalk}
           aria-haspopup="dialog"
           aria-expanded={aiTalkOpen}
-          className="fixed right-5 bottom-[calc(4rem+env(safe-area-inset-bottom)+1rem)] lg:bottom-6 z-40 inline-flex h-14 w-14 items-center justify-center rounded-full bg-[var(--accent-primary)] text-[var(--accent-primary-fg)] shadow-[var(--shadow-counter)] transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-primary)] active:scale-95 cursor-pointer"
+          className="group fixed right-5 bottom-[calc(4rem+env(safe-area-inset-bottom)+1rem)] lg:bottom-6 z-40 inline-flex h-16 w-16 items-center justify-center rounded-full border border-[#d7b76d]/45 bg-[#07140f] shadow-[0_12px_36px_-8px_rgba(8,70,47,0.72),0_0_24px_rgba(40,184,123,0.22)] transition-transform hover:scale-105 focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--accent-primary)] active:scale-95 cursor-pointer"
         >
-          <PenLine className="h-6 w-6" aria-hidden="true" />
+          <span className="pointer-events-none absolute inset-0 rounded-full bg-[radial-gradient(circle_at_30%_22%,rgba(225,198,125,0.22),transparent_46%)] opacity-80" />
+          {!aiTalkOpen && <AiTalkOrb mode="idle" className="pointer-events-none absolute inset-0 scale-[1.12] transition-transform duration-300 group-hover:scale-[1.22]" />}
+          <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.4" aria-hidden="true" className="pointer-events-none relative z-10 h-6 w-6 text-[#f0d58c] drop-shadow-[0_0_8px_rgba(240,213,140,0.8)]">
+            <rect x="9" y="9" width="30" height="30" rx="2" />
+            <rect x="9" y="9" width="30" height="30" rx="2" transform="rotate(45 24 24)" />
+            <circle cx="24" cy="24" r="3.5" />
+          </svg>
         </button>
       )}
 
