@@ -32,6 +32,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   const [listening, setListening] = useState(false);
   const [continuousMode, setContinuousMode] = useState(false);
   const [interim, setInterim] = useState('');
+  const [pendingText, setPendingText] = useState('');
   const [voiceError, setVoiceError] = useState('');
   const [requestError, setRequestError] = useState('');
   const [speakingId, setSpeakingId] = useState<number | null>(null);
@@ -39,6 +40,9 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   const listRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const restartTimerRef = useRef<number | null>(null);
+  const transcriptTimerRef = useRef<number | null>(null);
+  const pendingFinalTranscriptRef = useRef('');
+  const interimTranscriptRef = useRef('');
   const requestRef = useRef<AbortController | null>(null);
   const autoListenRef = useRef(false);
   const busyRef = useRef(false);
@@ -50,7 +54,10 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
   messagesRef.current = messages;
   const startRecognitionRef = useRef<() => void>(() => {});
   const askAssistantRef = useRef<(content: string) => void>(() => {});
+  const submitTranscriptRef = useRef<() => void>(() => {});
   const nextMessageId = useRef(1);
+  /** Wait for a full three seconds of silence before answering, so pauses between thoughts are not treated as the end. */
+  const endOfSpeechDelay = 3000;
 
   useEffect(() => {
     if (!open) return;
@@ -70,6 +77,10 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
       speechTokenRef.current += 1;
       if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
       restartTimerRef.current = null;
+      if (transcriptTimerRef.current !== null) window.clearTimeout(transcriptTimerRef.current);
+      transcriptTimerRef.current = null;
+      pendingFinalTranscriptRef.current = '';
+      interimTranscriptRef.current = '';
       recognitionRef.current?.stop();
       recognitionRef.current = null;
       window.speechSynthesis?.cancel();
@@ -82,7 +93,7 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
 
   useEffect(() => {
     if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
-  }, [messages, busy, listening, interim]);
+  }, [messages, busy, listening, interim, pendingText]);
 
   if (!open) return null;
 
@@ -100,7 +111,6 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     recognitionRef.current = null;
     recognition?.stop();
     setListening(false);
-    setInterim('');
   };
 
   const stopListening = () => {
@@ -108,6 +118,11 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     setContinuousMode(false);
     if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
     restartTimerRef.current = null;
+    if (transcriptTimerRef.current !== null) window.clearTimeout(transcriptTimerRef.current);
+    transcriptTimerRef.current = null;
+    pendingFinalTranscriptRef.current = '';
+    interimTranscriptRef.current = '';
+    setPendingText('');
     pauseRecognition();
     requestRef.current?.abort();
     speechTokenRef.current += 1;
@@ -115,6 +130,20 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     window.speechSynthesis?.cancel();
     setSpeakingId(null);
   };
+
+  const submitTranscriptAfterPause = () => {
+    if (transcriptTimerRef.current !== null) window.clearTimeout(transcriptTimerRef.current);
+    transcriptTimerRef.current = null;
+    if (!autoListenRef.current || busyRef.current) return;
+    const content = [pendingFinalTranscriptRef.current, interimTranscriptRef.current].filter(Boolean).join(' ').trim();
+    pendingFinalTranscriptRef.current = '';
+    interimTranscriptRef.current = '';
+    setPendingText('');
+    setInterim('');
+    if (content) askAssistantRef.current(content);
+  };
+
+  submitTranscriptRef.current = submitTranscriptAfterPause;
 
   const startRecognition = () => {
     if (!autoListenRef.current || busyRef.current || speakingRef.current || recognitionRef.current) return;
@@ -133,17 +162,22 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
       recognition.maxAlternatives = 1;
       recognition.continuous = true;
       recognition.onresult = (event) => {
-        let finalTranscript = '';
-        let interimTranscript = '';
+        let latestInterim = '';
         for (let index = event.resultIndex ?? 0; index < event.results.length; index += 1) {
           const result = event.results[index];
           const transcript = result?.[0]?.transcript?.trim();
           if (!transcript) continue;
-          if (result[0].isFinal === false) interimTranscript += `${transcript} `;
-          else finalTranscript += `${transcript} `;
+          if (result[0].isFinal === false) latestInterim += `${transcript} `;
+          else pendingFinalTranscriptRef.current += `${transcript} `;
         }
-        setInterim(interimTranscript.trim());
-        if (finalTranscript.trim()) askAssistantRef.current(finalTranscript.trim());
+        interimTranscriptRef.current = latestInterim.trim();
+        setInterim(interimTranscriptRef.current);
+        setPendingText(pendingFinalTranscriptRef.current.trim());
+
+        if (transcriptTimerRef.current !== null) window.clearTimeout(transcriptTimerRef.current);
+        if (pendingFinalTranscriptRef.current.trim() || interimTranscriptRef.current) {
+          transcriptTimerRef.current = window.setTimeout(() => submitTranscriptRef.current(), endOfSpeechDelay);
+        }
       };
       recognition.onerror = (event) => {
         if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
@@ -161,7 +195,10 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
         if (recognitionRef.current !== recognition) return;
         recognitionRef.current = null;
         setListening(false);
-        setInterim('');
+        // Keep the transcript visible while the silence timer decides when the user is done.
+        if ((pendingFinalTranscriptRef.current.trim() || interimTranscriptRef.current) && transcriptTimerRef.current === null) {
+          transcriptTimerRef.current = window.setTimeout(() => submitTranscriptRef.current(), endOfSpeechDelay);
+        }
         scheduleAutoListen();
       };
       recognitionRef.current = recognition;
@@ -190,6 +227,12 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     setSpeakingId(null);
     if (restartTimerRef.current !== null) window.clearTimeout(restartTimerRef.current);
     restartTimerRef.current = null;
+    if (transcriptTimerRef.current !== null) window.clearTimeout(transcriptTimerRef.current);
+    transcriptTimerRef.current = null;
+    pendingFinalTranscriptRef.current = '';
+    interimTranscriptRef.current = '';
+    setPendingText('');
+    setInterim('');
     startRecognition();
   };
 
@@ -298,6 +341,8 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
     micRef.current?.focus();
   };
 
+  const visibleTranscript = [pendingText, interim].filter(Boolean).join(' ');
+
   return (
     <div
       className="fixed inset-0 z-[60] flex items-end justify-center bg-black/55 backdrop-blur-sm sm:items-center sm:p-4"
@@ -382,12 +427,12 @@ export const AiTalkOverlay: React.FC<AiTalkOverlayProps> = ({ open, onClose, lan
             </div>
           )}
           {requestError && <p role="alert" className="rounded-xl border border-red-500/25 bg-red-500/5 px-3 py-2 text-xs leading-relaxed text-red-700 dark:text-red-300">{requestError}</p>}
-          {interim && (
+          {visibleTranscript && (
             <div className="flex justify-end">
-              <div className="max-w-[88%] rounded-2xl rounded-br-md border border-[var(--accent-primary)]/60 bg-[var(--accent-primary)]/10 px-4 py-3 text-sm leading-relaxed text-[var(--text-primary)] [overflow-wrap:anywhere]">{interim}</div>
+              <div className="max-w-[88%] rounded-2xl rounded-br-md border border-[var(--accent-primary)]/60 bg-[var(--accent-primary)]/10 px-4 py-3 text-sm leading-relaxed text-[var(--text-primary)] [overflow-wrap:anywhere]">{visibleTranscript}</div>
             </div>
           )}
-          {listening && !interim && <p className="text-center text-xs text-[var(--accent-primary)]" role="status">{t.listening}</p>}
+          {listening && !visibleTranscript && <p className="text-center text-xs text-[var(--accent-primary)]" role="status">{t.listening}</p>}
         </div>
 
         <footer className="border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] px-3 pb-safe pt-3 sm:px-5">
