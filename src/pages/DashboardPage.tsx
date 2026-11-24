@@ -25,24 +25,6 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
   return (
     <div className="space-y-8">
-      <section className="space-y-3" aria-labelledby="home-intro-heading">
-        <h1 id="home-intro-heading" className="font-display text-3xl font-bold leading-tight text-[var(--text-primary)] sm:text-4xl">
-          {language === 'bn' ? 'ফ্রি জিকির কাউন্টার ও ডিজিটাল তাসবিহ' : 'Free Dhikr Counter & Digital Tasbih'}
-        </h1>
-        <p className="max-w-3xl text-sm leading-6 text-[var(--text-secondary)] sm:text-base">
-          {language === 'bn'
-            ? 'দরুদ, ইস্তিগফার ও দৈনন্দিন জিকির গুনুন একটি ব্যক্তিগত, অফলাইন-প্রস্তুত কাউন্টারে। ইংরেজি ও বাংলা ভাষায় ব্যবহার করুন—কোনো অ্যাকাউন্টের প্রয়োজন নেই।'
-            : 'Count dhikr, durood, istighfar, and daily adhkar with a private, offline-ready counter. Use the app in English or Bengali; no account is needed.'}
-        </p>
-        <nav aria-label="Dhikr Counter guides" className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-medium text-[var(--accent-primary)]">
-          <a href="/features.html" className="underline decoration-[var(--border-strong)] underline-offset-4 hover:decoration-current">Explore app features</a>
-          <a href="/guides/digital-tasbih.html" className="underline decoration-[var(--border-strong)] underline-offset-4 hover:decoration-current">Digital tasbih guide</a>
-          <a href="/guides/daily-dhikr.html" className="underline decoration-[var(--border-strong)] underline-offset-4 hover:decoration-current">Build a daily dhikr habit</a>
-          <a href="/privacy.html" className="underline decoration-[var(--border-strong)] underline-offset-4 hover:decoration-current">Privacy</a>
-        </nav>
-      </section>
-
-
       <section className="space-y-3" aria-labelledby="home-dhikr-heading">
         <h2 id="home-dhikr-heading" className="text-base font-semibold text-[var(--text-primary)]">
           {t.nav.library}
